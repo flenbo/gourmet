@@ -421,7 +421,7 @@ function buildQuotePdf(){
     doc.text('Gourmet Gatherings  ·  A Trademark Brand of Flenbo Foodworks Pvt. Ltd', Mg, H-38);
     doc.text(co.phone2+'  ·  '+co.email2+'  ·  @gatherings.gourmet', W-Mg, H-38, {align:'right'});
     doc.setFontSize(6.8); doc.setTextColor(RED[0],RED[1],RED[2]);
-    doc.text('GSTIN '+co.gstin+'     ·     '+co.udyam, Mg, H-25);
+    doc.text('GSTIN '+co.gstin+'     ·     '+co.udyam, W/2, H-25, {align:'center'});
     doc.setTextColor(170,164,154);
     doc.text(('0'+pageNo).slice(-2), W-Mg, H-25, {align:'right'});
   }
