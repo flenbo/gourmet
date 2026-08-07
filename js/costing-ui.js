@@ -632,8 +632,18 @@ function buildQuotePdf(){
     [['LIVE COUNTERS','Live Counters'],  ['BEVERAGES','Beverages'],    ['CURD','Curd Preparations']]
   ];
   var placed={}; GRID.forEach(function(r){ r.forEach(function(c){ placed[c[1]]=1; }); });
+  // Anything the menu card does not name (custom dishes, unmatched names) is
+  // grouped under one heading rather than leaking a stray — column.
   var extra=Object.keys(byCat).filter(function(k){ return !placed[k]; });
-  while(extra.length){ GRID.push(extra.splice(0,3).map(function(k){ return [k.toUpperCase(), k]; })); }
+  if(extra.length){
+    var misc=[]; extra.forEach(function(k){ misc=misc.concat(byCat[k]); delete byCat[k]; });
+    byCat['Other Selections']=misc; extra=['Other Selections'];
+  }
+  while(extra.length){
+    var chunk=extra.splice(0,3).map(function(k){ return [k.toUpperCase(), k]; });
+    while(chunk.length<3) chunk.push(['','']);   // pad — a short row used to crash on cols[1].length
+    GRID.push(chunk);
+  }
 
   var HF=[247,245,250], HT=[64,58,96], CL=[224,220,232], ZEB=[252,251,253];
   var gw=W-Mg-Mg, cw=gw/3, hRow=20, bRow=17.5;
@@ -652,13 +662,14 @@ function buildQuotePdf(){
     l.forEach(function(ln,i){ centerText(ln, x+w/2, ty+i*7.4, mode==='head'?0.8:0); });
   }
   GRID.forEach(function(br){
-    var cols=br.map(function(c){ return byCat[c[1]]||[]; });
-    var rows=Math.max(2, cols[0].length, cols[1].length, cols[2].length);
+    var cols=br.map(function(c){ return (c && c[1] && byCat[c[1]]) || []; });
+    if(!cols.some(function(c){ return c.length; })) return;   // nothing picked in this band
+    var rows=Math.max.apply(null,[2].concat(cols.map(function(c){ return c.length; })));
     if(y + hRow + rows*bRow + 12 > H-FOOT-22){ footer(); doc.addPage(); header('MENU OFFERING (CONTD.)'); }
-    br.forEach(function(c,i){ cell(Mg+i*cw, cw, hRow, c[0], 'head'); });
+    br.forEach(function(c,i){ if(c && c[1]) cell(Mg+i*cw, cw, hRow, c[0], 'head'); });
     y += hRow;
     for(var r=0;r<rows;r++){
-      for(var i=0;i<3;i++) cell(Mg+i*cw, cw, bRow, cols[i][r]||'', 'body', r%2===1);
+      for(var i=0;i<3;i++) if(br[i] && br[i][1]) cell(Mg+i*cw, cw, bRow, cols[i][r]||'', 'body', r%2===1);
       y += bRow;
     }
     y += 12;
