@@ -513,19 +513,58 @@ function buildQuotePdf(){
   ]);
   footer();
 
-  /* ---- page 2 : menu ---- */
-  doc.addPage(); brandHeader('MENU SELECTION');
+  /* ---- page 2 : menu, three-column grid ---- */
+  doc.addPage(); brandHeader('MENU OFFERING');
   var byCat={}; cost.lines.forEach(function(l){ (byCat[l.cat]=byCat[l.cat]||[]).push(l.name); });
-  Object.keys(byCat).forEach(function(cat){
-    var items=byCat[cat];
-    ensure(30);
-    doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(RED[0],RED[1],RED[2]);
-    doc.text(String(cat).toUpperCase()+'  ('+items.length+')', Mg, y); y+=13;
-    doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-    var l=doc.splitTextToSize(items.join('   •   '), W-Mg-Mg-8);
-    ensure(l.length*12+8); doc.text(l, Mg+8, y); y += l.length*12 + 10;
+
+  // fixed layout, three courses across — matches the printed proposal
+  var GRID = [
+    [['STARTERS','Appetizers/Starters'], ['MAINS','Main Course'],        ['SALADS','Salads']],
+    [['CRISPY BITES','Crispy Bites'],    ['RICE','Rice'],                ['SOUPS','Soups']],
+    [['LENTILS','Lentils'],              ['ASSORTED BREADS','Breads'],   ['DESSERTS','Desserts']],
+    [['LIVE COUNTERS','Live Counters'],  ['BEVERAGES','Beverages'],      ['CURD','Curd Preparations']]
+  ];
+  var placed = {};
+  GRID.forEach(function(r){ r.forEach(function(c){ placed[c[1]] = 1; }); });
+  // anything outside the fixed grid gets its own block row so nothing is dropped
+  var extra = Object.keys(byCat).filter(function(k){ return !placed[k]; });
+  while(extra.length){ GRID.push(extra.splice(0,3).map(function(k){ return [k.toUpperCase(), k]; })); }
+
+  var HDR_FILL=[232,233,248], HDR_TXT=[35,38,84], CELL_LINE=[186,190,220];
+  var gw = W - Mg - Mg, cw = gw/3, hRow = 19, bRow = 17;
+
+  function drawCell(x, w, h, txt, isHead){
+    if(isHead){ doc.setFillColor(HDR_FILL[0],HDR_FILL[1],HDR_FILL[2]); doc.rect(x, y, w, h, 'F'); }
+    doc.setDrawColor(CELL_LINE[0],CELL_LINE[1],CELL_LINE[2]); doc.setLineWidth(0.6);
+    doc.rect(x, y, w, h);
+    if(!txt) return;
+    doc.setFont('helvetica', isHead?'bold':'normal');
+    doc.setFontSize(isHead?7.6:7.4);
+    if(isHead) doc.setTextColor(HDR_TXT[0],HDR_TXT[1],HDR_TXT[2]);
+    else doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+    var lines = doc.splitTextToSize(String(txt).toUpperCase(), w-10);
+    if(lines.length>2) lines = lines.slice(0,2);
+    var ty = y + h/2 - ((lines.length-1)*7)/2 + 2.4;
+    lines.forEach(function(l,i){ doc.text(l, x + w/2, ty + i*7.4, {align:'center'}); });
+  }
+
+  GRID.forEach(function(blockRow){
+    var cols = blockRow.map(function(c){ return (byCat[c[1]] || []); });
+    var rows = Math.max(2, cols[0].length, cols[1].length, cols[2].length);
+    var blockH = hRow + rows*bRow + 10;
+    if(y + blockH > H - 70){ footer(); doc.addPage(); brandHeader('MENU OFFERING (CONTD.)'); }
+    // header strip
+    blockRow.forEach(function(c,i){ drawCell(Mg + i*cw, cw, hRow, c[0], true); });
+    y += hRow;
+    // body
+    for(var r=0; r<rows; r++){
+      for(var i=0; i<3; i++){ drawCell(Mg + i*cw, cw, bRow, cols[i][r] || '', false); }
+      y += bRow;
+    }
+    y += 10;
   });
-  if(CUR.notes){ sectionTitle('Additional Notes'); para(String(CUR.notes)); }
+
+  if(CUR.notes){ y += 4; sectionTitle('Additional Notes'); para(String(CUR.notes)); }
   footer();
 
   /* ---- pages 3+ : terms ---- */
