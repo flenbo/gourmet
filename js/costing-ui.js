@@ -82,8 +82,8 @@ function injectPages(){
     '<p class="small muted" style="margin-bottom:16px">Menu comes straight from the event. Add labour, transport and season to get your price.</p>'+
     '<div class="cbar">'+
       '<select id="cEvent" style="flex:1;min-width:250px;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></select>'+
-      '<button class="btn sm btn-ghost" id="cQuoteBtn">Print quote</button>'+
-      '<button class="btn sm btn-ghost" id="cInvBtn">Print invoice</button>'+
+      '<button class="btn sm btn-ghost" id="cQuoteBtn">\u2193 PDF Quote</button>'+
+      '<button class="btn sm" id="cWaBtn" style="background:#1f7a45;color:#fff;border-color:transparent">WhatsApp Quote</button>'+
       '<button class="btn sm btn-gold" id="cSaveBtn">Save to event</button>'+
     '</div>'+
     '<div id="cBody"></div>';
@@ -149,7 +149,16 @@ function pick(i){
   OPT.gm          = saved.gm!==undefined ? saved.gm : C.settings().drivers.gmTarget;
   OPT.negotiation = saved.negotiation!==undefined ? saved.negotiation : C.settings().drivers.negotiation;
   OPT.discount    = saved.discount!==undefined ? saved.discount : C.settings().drivers.showDiscount;
-  OPT.labour      = saved.labour ? saved.labour.slice() : C.settings().labour.map(function(l){ return {role:l.role,rate:l.rate,count:l.count}; });
+  if(saved.labour){ OPT.labour = saved.labour.slice(); }
+  else {
+    var px = Math.max(1, +CUR.pax || 1);
+    OPT.labour = C.settings().labour.map(function(l){
+      var n = l.count;
+      if(/steward/i.test(l.role)) n = Math.max(2, Math.ceil(px/25));
+      else if(/clean/i.test(l.role)) n = Math.max(1, Math.ceil(px/60));
+      return {role:l.role, rate:l.rate, count:n};
+    });
+  }
   render();
 }
 
@@ -322,79 +331,289 @@ function renderRates(){
   $$('[data-buf]').forEach(function(el){ el.onchange=function(){ st.rates[el.dataset.buf].buf=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
 }
 
-/* ---------- documents ---------- */
-function printDoc(html){
-  var w = window.open('','_blank');
-  if(!w){ toast('Allow pop-ups to print','err'); return; }
-  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gourmet Gatherings</title>'+
-    '<style>body{font:12px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;color:#111;margin:26px}'+
-    'h1{font-size:19px;text-align:center;letter-spacing:.07em;text-transform:uppercase;margin:0 0 14px}'+
-    'h2{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:#1F3864;margin:16px 0 6px}'+
-    'table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}'+
-    'th{background:#e8ecf7;color:#1F3864;border:1px solid #c9cfe0;padding:5px 7px;text-align:left;font-size:10px}'+
-    'td{border:1px solid #d8dce6;padding:5px 7px}.num{text-align:right}'+
-    '.co{border-bottom:2px solid #111;padding-bottom:9px;margin-bottom:12px}'+
-    '.co .nm{font-size:16px;font-weight:700}.co .sub{font-size:10.5px;color:#555;line-height:1.5}'+
-    '.tot{display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid #d8dce6}'+
-    '.tot.g{border-top:2px solid #111;font-size:14px;font-weight:700;padding-top:8px}'+
-    '.fine{font-size:10px;color:#555;line-height:1.6}.box{border:1px solid #d8dce6;border-radius:5px;padding:9px 11px;margin-bottom:9px}'+
-    '.cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}@page{margin:14mm}</style></head><body>'+html+'</body></html>');
-  w.document.close(); setTimeout(function(){ w.print(); }, 350);
+/* ---------- branded PDF quote (matches js/pdf.js house style) ---------- */
+var RED=[216,30,58], CHAR=[30,26,20], MUTED=[140,131,117], LINE=[224,214,198], CREAM=[255,253,248];
+
+var QTERMS = [
+  ['1. Pricing & Guest Count', null, [
+    'Prices are per plate and inclusive of applicable taxes unless mentioned otherwise.',
+    'Final guest count (MG - Minimum Guarantee) must be confirmed 48 hours prior to the event.',
+    'We provision only 5%-7.5% extra plates over MG.',
+    'Any consumption beyond MG will be charged additionally as per per-plate rate.']],
+  ['2. Payment Terms', null, [
+    '75% advance payment or as agreed by Flenbo Foodworks is mandatory for order confirmation.',
+    'Balance 25% payment or due amount must be cleared immediately after the event on the same day (before team demobilization).',
+    'Credit card payment would attract additional 3% charges on the invoice amount.',
+    'Any delay in balance payment beyond 24 hours will attract follow-up and may impact future services.']],
+  ['3. Service Timings', null, [
+    'Beverage service - Only one option applicable: (With Starters / With Main Course / Post Main Course)',
+    'Starter service duration: Maximum 60 minutes or as agreed by Flenbo Foodworks in writing.',
+    'Main course service duration: Maximum 90 minutes after starters or as agreed by Flenbo Foodworks in writing.',
+    'Starters and Main Course will not run simultaneously.',
+    'There will be a 15-minute gap between closure of starter service and start of main course service.',
+    'Any extension beyond agreed service time will be chargeable and communicated well in advance to the client.']],
+  ['4. Cancellation & Refund Policy', 'Partial Refunds are applicable only in cases of:', [
+    'Non-delivery due to our fault',
+    'Completely wrong menu supplied',
+    'Verified quality issues (with photo proof)',
+    'Order is cancelled atleast 48 hours before the event.'],
+    'No refunds will be given for:', [
+    'Taste preferences or dislikes','Change of mind','Guest turnout being lower than MG',
+    'Guest delays or no show due to traffic, weather, or venue restrictions',
+    'No refunds for orders cancelled within 0-48 hours prior to the event.']],
+  ['5. Food Allergens', null, [
+    'Our food may contain or come in contact with allergens such as dairy, gluten, nuts, soy, and seeds.',
+    'Clients must inform us in advance of any dietary restrictions or allergies.']],
+  ['6. Client Responsibilities', 'Client must ensure:', [
+    'To provide space at ODC site to setup cooking area and Tandoor (if required as per menu)',
+    'Power & water availability (if required)',
+    'Timely start of event as per schedule.',
+    'Maintain Starters and Main Course timelines as communicated above in service timings.',
+    'Delay caused due to venue readiness will not impact service duration or billing.']],
+  ['7. Left Over Food Packing', null, [
+    'Left over food would be packed in the proportion of shortfall of numbers to that of Minimum Guarantee. No left over food would be packed once the minimum guarantee numbers are achieved.']],
+  ['8. Legal Jurisdiction', null, [
+    'All disputes shall be subject to Gurugram, Haryana jurisdiction only.']]
+];
+
+function buildQuotePdf(){
+  if(!window.jspdf) throw new Error('PDF library still loading - try again in a moment.');
+  if(!CUR || !window._ggLast) throw new Error('Select an event first.');
+  var st=C.settings(), co=st.company, dr=st.drivers;
+  var cost=window._ggLast.cost, p=window._ggLast.price;
+  var LOGO = window.GG_LOGO || null;
+  var doc = new window.jspdf.jsPDF({unit:'pt', format:'a4'});
+  var W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), Mg=48, y=0;
+
+  function fmtD(ds){ if(!ds) return '—';
+    try{ return new Date(String(ds)+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }catch(e){ return ds; } }
+  function rs(n){ return 'Rs ' + Math.round(n||0).toLocaleString('en-IN'); }
+  function footer(){
+    doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(.5); doc.line(Mg,H-46,W-Mg,H-46);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+    doc.text('Gourmet Gatherings  ·  Operated by Flenbo Foodworks Private Limited', Mg, H-33);
+    doc.text('+91 93118 77987  ·  customercare@flenbo.com  ·  @gatherings.gourmet', W-Mg, H-33, {align:'right'});
+    doc.setFontSize(7); doc.setTextColor(RED[0],RED[1],RED[2]);
+    doc.text('GSTIN: '+co.gstin+'     ·     '+co.udyam, W/2, H-19, {align:'center'});
+  }
+  var curSub='CATERING PROPOSAL';
+  function ensure(sp){ if(y+sp > H-60){ footer(); doc.addPage(); brandHeader(curSub+' (CONTD.)'); } }
+  function brandHeader(sub){
+    if(sub.indexOf('(CONTD.)')<0) curSub=sub;
+    doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,118,'F');
+    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(2); doc.line(0,118,W,118);
+    if(LOGO && LOGO.full){ var lw=150, lh=lw*(LOGO.fullH/LOGO.fullW);
+      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, 16, lw, lh); }catch(e){} }
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+    doc.text(sub, W/2, 108, {align:'center'});
+    y = 146;
+  }
+  function sectionTitle(t){
+    ensure(40); y+=6;
+    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.4); doc.line(Mg,y,Mg+22,y);
+    doc.setFont('times','bold'); doc.setFontSize(12.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+    doc.text(t.toUpperCase(), Mg+30, y+4); y+=18;
+  }
+  function kv(k,v){
+    if(v===undefined||v===null||v==='') v='—'; v=String(v); ensure(16);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+    doc.text(k.toUpperCase(), Mg, y);
+    doc.setFontSize(10); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+    var l=doc.splitTextToSize(v, W-Mg-Mg-140); doc.text(l, Mg+140, y);
+    y += Math.max(14, l.length*12);
+  }
+  function bullets(items, numbered){
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+    items.forEach(function(t,i){
+      var l=doc.splitTextToSize(t, W-Mg-Mg-18);
+      ensure(l.length*12+4);
+      doc.setTextColor(RED[0],RED[1],RED[2]);
+      doc.text(numbered?(i+1)+'.':'•', Mg+2, y);
+      doc.setTextColor(55,50,46);
+      doc.text(l, Mg+18, y); y += l.length*12 + 3;
+    });
+  }
+  function para(t,size){
+    doc.setFont('helvetica','normal'); doc.setFontSize(size||9.5); doc.setTextColor(55,50,46);
+    var l=doc.splitTextToSize(t, W-Mg-Mg); ensure(l.length*12+4); doc.text(l, Mg, y); y += l.length*12 + 6;
+  }
+
+  /* ---- page 1 : proposal + commercials ---- */
+  brandHeader('CATERING PROPOSAL');
+  // file number badge
+  doc.setFillColor(250,247,241); doc.roundedRect(Mg, y-12, 200, 34, 5,5,'F');
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+  doc.text('FILE NUMBER', Mg+14, y+1);
+  doc.setFont('times','bold'); doc.setFontSize(14); doc.setTextColor(RED[0],RED[1],RED[2]);
+  doc.text(String(CUR.fileNumber||'—'), Mg+14, y+17);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+  doc.text('Quotation date: '+new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}), W-Mg, y+1, {align:'right'});
+  doc.text('Valid for 15 days from date of issue', W-Mg, y+13, {align:'right'});
+  y += 40;
+
+  sectionTitle('Client Details');
+  kv('Client name', CUR.clientName);
+  kv('Mobile number', CUR.mobile);
+  if(CUR.venue) kv('Venue address', CUR.venue);
+
+  sectionTitle('Event Details');
+  kv('Event type', CUR.eventType==='OTHERS'?(CUR.eventTypeOther||'Others'):CUR.eventType);
+  kv('Date of event', fmtD(CUR.eventDate));
+  kv('Event slot', CUR.eventSlot);
+  if(CUR.eventTime) kv('Event time', CUR.eventTime);
+  if(CUR.occasion) kv('Occasion', CUR.occasion);
+  kv('Guest count / MG', cost.pax + ' guests');
+  kv('Dietary preference', CUR.dietary);
+  kv('Event location', CUR.location);
+
+  sectionTitle('Commercials');
+  var perHead=p.listPP, gross=perHead*cost.pax, discAmt=gross-p.net, afterD=p.net, total=afterD+p.gst;
+  var rowH=21, tw=W-Mg-Mg, cwA=tw*0.56, cwB=tw*0.20, cwC=tw*0.24;
+  function crow(a,b,c,o){
+    o=o||{}; ensure(rowH+4);
+    if(o.fill){ doc.setFillColor(250,247,241); doc.rect(Mg,y-13,tw,rowH,'F'); }
+    if(o.dark){ doc.setFillColor(CHAR[0],CHAR[1],CHAR[2]); doc.rect(Mg,y-13,tw,rowH,'F'); }
+    doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(.5); doc.rect(Mg,y-13,tw,rowH);
+    doc.setFont('helvetica', (o.bold||o.dark)?'bold':'normal'); doc.setFontSize(o.head?8:9.5);
+    if(o.dark) doc.setTextColor(255,255,255);
+    else if(o.head) doc.setTextColor(RED[0],RED[1],RED[2]);
+    else doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+    doc.text(String(a), Mg+9, y);
+    doc.text(String(b), Mg+cwA+cwB-9, y, {align:'right'});
+    doc.text(String(c), Mg+tw-9, y, {align:'right'});
+    y += rowH;
+  }
+  y += 4;
+  crow('Particulars','Per person','Amount',{head:true,fill:true,bold:true});
+  crow('Custom catering package  ('+cost.pax+' guests)', rs(perHead), rs(gross));
+  if(p.discountPct>0){
+    crow('Less: special discount ('+String(p.discountPct.toFixed(1)).replace(/\.0$/,'')+'%)','','- '+rs(discAmt));
+    crow('Total after discount', rs(afterD/cost.pax), rs(afterD), {bold:true});
+  }
+  crow('GST @ '+dr.gst+'%','', rs(p.gst));
+  crow('TOTAL PAYABLE', rs(total/cost.pax), rs(total), {dark:true});
+  y += 12;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+  var wl=doc.splitTextToSize('INR: '+C.words(total).replace(' only',' Only'), tw);
+  ensure(wl.length*12+6); doc.text(wl, Mg, y); y += wl.length*12 + 10;
+
+  sectionTitle('Inclusions');
+  bullets([
+    'Complete food as per the enclosed menu, freshly prepared',
+    'Professional chef, stewards and cleaning staff',
+    'Buffet tables, premium chafing dishes, 5-star grade porcelain crockery and premium cutlery',
+    'Chuk disposables, packaged drinking water and beverages as per the menu',
+    'Delivery and logistics to your venue'
+  ]);
+  sectionTitle('Not Included');
+  bullets([
+    'Round tables, chairs, stage, backdrop, tenting and seating arrangements',
+    'Decor, floral, photography, videography, DJ and any third party services',
+    'Any item not listed in the menu or inclusions above'
+  ]);
+  footer();
+
+  /* ---- page 2 : menu ---- */
+  doc.addPage(); brandHeader('MENU SELECTION');
+  var byCat={}; cost.lines.forEach(function(l){ (byCat[l.cat]=byCat[l.cat]||[]).push(l.name); });
+  Object.keys(byCat).forEach(function(cat){
+    var items=byCat[cat];
+    ensure(30);
+    doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(RED[0],RED[1],RED[2]);
+    doc.text(String(cat).toUpperCase()+'  ('+items.length+')', Mg, y); y+=13;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+    var l=doc.splitTextToSize(items.join('   •   '), W-Mg-Mg-8);
+    ensure(l.length*12+8); doc.text(l, Mg+8, y); y += l.length*12 + 10;
+  });
+  if(CUR.notes){ sectionTitle('Additional Notes'); para(String(CUR.notes)); }
+  footer();
+
+  /* ---- pages 3+ : terms ---- */
+  doc.addPage(); brandHeader('TERMS & CONDITIONS');
+  para("Gourmet Gatherings is Delhi NCR's premium culinary and experiential hospitality brand, operated by Flenbo Foodworks Private Limited. Whether it's a private celebration, a corporate gathering, or a social function, we pride ourselves on delivering excellence, personalization, and seamless execution.");
+  y+=2;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+  ensure(16); doc.text('Some highlights about us:', Mg, y); y+=14;
+  bullets(['Operated by a passionate team of culinary professionals and hospitality experts',
+    'Multi-brand cloud kitchens with high operational standards',
+    'Kitchens certified with ISO 9001, ISO 22000, and HACCP for food safety and quality assurance',
+    'Capacity to manage events from 20 to 2000+ guests with on-site and off-site setups',
+    'Wide range of menu themes including North Indian, Asian, Continental, Fusion, and Live Counter formats.']);
+  y+=4;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+  ensure(16); doc.text('Order confirmation in the form of Advance Payment implies acceptance of these terms:', Mg, y, {maxWidth:W-Mg-Mg}); y+=18;
+  QTERMS.forEach(function(sec){
+    sectionTitle(sec[0]);
+    if(sec[1]){ doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+      ensure(15); doc.text(sec[1], Mg, y); y+=14; bullets(sec[2], true); }
+    else bullets(sec[2]);
+    if(sec[3]){ y+=4; doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+      ensure(15); doc.text(sec[3], Mg, y); y+=14; bullets(sec[4], true); }
+  });
+  sectionTitle('Acceptance');
+  para('By confirming the order and making advance payment, the client agrees to all the above Terms & Conditions.');
+  y+=8;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+  ensure(50);
+  doc.text('Warm regards,', Mg, y); y+=13;
+  doc.text('Flenbo Foodworks Private Limited', Mg, y); y+=15;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(55,50,46);
+  doc.text('+91 93118 77987', Mg, y); y+=12;
+  doc.text('customercare@flenbo.com', Mg, y); y+=12;
+  doc.text('@gatherings.gourmet', Mg, y);
+  footer();
+
+  return doc;
 }
-function coHead(){
-  var co = C.settings().company;
-  return '<div class="co"><div class="nm">'+esc(co.name)+'</div><div class="sub">'+esc(co.addr)+'<br>'+
-    'Phone: '+esc(co.phone2)+' · Email: '+esc(co.email2)+'<br>GSTIN: '+esc(co.gstin)+' · PAN: '+esc(co.pan)+' · State: '+esc(co.state)+'</div></div>';
+
+function quoteFileName(){
+  return 'Gourmet-Gatherings-Quote-' + ((CUR&&CUR.fileNumber)||'event') + '.pdf';
 }
-function quoteDoc(){
-  var d = window._ggLast; if(!d||!CUR){ toast('Select an event first','err'); return; }
-  var co = C.settings().company, p = d.price, c = d.cost;
-  var byCat = {};
-  c.lines.forEach(function(l){ (byCat[l.cat]=byCat[l.cat]||[]).push(l.name); });
-  printDoc(coHead()+'<h1>Proposal</h1>'+
-    '<div class="cols"><div class="box"><b>To</b><br>'+esc(CUR.clientName||'')+'<br>'+esc(CUR.venue||CUR.location||'')+'<br>'+esc(CUR.mobile||'')+'</div>'+
-    '<div class="box"><b>Event</b><br>'+esc(CUR.eventType||'')+' · '+esc(CUR.eventDate||'')+'<br>'+esc(CUR.eventSlot||'')+
-    '<br>MG: '+c.pax+' guests · File '+esc(CUR.fileNumber||'')+'</div></div>'+
-    '<h2>Menu offering</h2><table><tbody>'+
-    Object.keys(byCat).map(function(k){ return '<tr><th style="width:170px">'+esc(k)+'</th><td>'+byCat[k].map(esc).join(' · ')+'</td></tr>'; }).join('')+
-    '</tbody></table>'+
-    '<h2>Commercials</h2><table><tbody>'+
-    '<tr><td>Catering package — '+c.pax+' guests</td><td class="num">'+M(p.listPP)+' / guest</td><td class="num">'+M(p.list)+'</td></tr>'+
-    '<tr><td>Discount</td><td class="num">'+N(p.discountPct,1)+'%</td><td class="num">−'+M(p.discountAmt)+'</td></tr>'+
-    '<tr><td><b>Total after discount</b></td><td class="num"><b>'+M(p.netPP)+' / guest</b></td><td class="num"><b>'+M(p.net)+'</b></td></tr>'+
-    '<tr><td>GST @ '+C.settings().drivers.gst+'%</td><td class="num"></td><td class="num">'+M(p.gst)+'</td></tr>'+
-    '<tr><th>TOTAL</th><th></th><th class="num">'+M(p.grand)+'</th></tr>'+
-    '</tbody></table><p class="fine"><b>'+esc(C.words(p.grand))+'</b></p>'+
-    '<h2>Terms &amp; conditions</h2><p class="fine">'+(C.DATA.terms||[]).map(function(t){return '&bull; '+esc(t);}).join('<br>')+'</p>');
+function downloadQuotePdf(){
+  try{ buildQuotePdf().save(quoteFileName()); toast('Quote PDF downloaded','ok'); }
+  catch(e){ toast(e.message||'Could not build the PDF','err'); }
 }
-function invoiceDoc(){
-  var d = window._ggLast; if(!d||!CUR){ toast('Select an event first','err'); return; }
-  var co = C.settings().company, inv = C.invoiceFor(CUR, {price:d.price});
-  var no = CUR.invoiceNo || (co.fy+'/'+co.invoiceSeq);
-  printDoc(coHead()+'<h1>Tax Invoice</h1>'+
-    '<div class="cols"><div class="box"><b>Bill To</b><br>'+esc(CUR.clientName||'')+'<br>'+esc(CUR.venue||CUR.location||'')+
-      '<br>Contact: '+esc(CUR.mobile||'')+' · State: '+esc(co.state)+'</div>'+
-    '<div class="box"><b>Invoice Details</b><br>Invoice No.: '+esc(no)+'<br>Date: '+esc(new Date().toLocaleDateString('en-GB'))+
-      '<br>Place of Supply: '+esc(co.state)+'</div></div>'+
-    '<table><thead><tr><th>#</th><th>Item</th><th>HSN/SAC</th><th class="num">Qty</th><th>Unit</th>'+
-    '<th class="num">Price/Unit</th><th class="num">Discount</th><th class="num">GST</th><th class="num">Amount</th></tr></thead><tbody>'+
-    '<tr><td>1</td><td><b>'+esc(inv.itemName)+'</b></td><td>'+esc(inv.hsn)+'</td><td class="num">'+inv.qty+'</td><td>'+esc(inv.unit)+'</td>'+
-    '<td class="num">'+M2(inv.rate)+'</td><td class="num">'+M2(inv.discAmt)+' ('+N(inv.discPct,1)+'%)</td>'+
-    '<td class="num">'+M2(inv.gstAmt)+' ('+inv.gstPct+'%)</td><td class="num">'+M2(inv.amount)+'</td></tr>'+
-    '</tbody></table>'+
-    '<h2>Tax summary</h2><table><thead><tr><th>HSN/SAC</th><th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">Total tax</th></tr></thead>'+
-    '<tbody><tr><td>'+esc(inv.hsn)+'</td><td class="num">'+M2(inv.taxable)+'</td><td class="num">'+M2(inv.cgst)+'</td><td class="num">'+M2(inv.sgst)+'</td><td class="num">'+M2(inv.gstAmt)+'</td></tr></tbody></table>'+
-    '<div class="cols"><div><div class="box fine"><b>Bank Details</b><br>'+esc(co.bankName)+'<br>A/c: '+esc(co.bankAc)+'<br>IFSC: '+esc(co.bankIfsc)+'<br>'+esc(co.bankHolder)+'</div></div>'+
-    '<div><div class="tot"><span>Sub Total</span><b>'+M2(inv.amount)+'</b></div>'+
-    '<div class="tot"><span>Round Off</span><b>'+(inv.roundOff>=0?'+':'')+N(inv.roundOff,2)+'</b></div>'+
-    '<div class="tot g"><span>Total</span><b>'+M(inv.total)+'</b></div>'+
-    '<div class="tot"><span>Advance ('+C.settings().drivers.advancePct+'%)</span><b>'+M(inv.advance)+'</b></div>'+
-    '<div class="tot"><span>Balance</span><b>'+M(inv.balance)+'</b></div>'+
-    '<div class="tot"><span>You Saved</span><b>'+M2(inv.saved)+'</b></div></div></div>'+
-    '<p class="fine"><b>'+esc(inv.words)+'</b></p>'+
-    '<p class="fine">GST @ 5% (without ITC) under HSN/SAC 996334 (Catering Services). Payment due on receipt unless agreed in writing. '+
-    'Credit card payment attracts an additional '+C.settings().drivers.cardSurcharge+'%. All disputes subject to Gurugram, Haryana jurisdiction. '+
-    'This invoice is system-generated and does not require a physical signature.</p>');
+function waNumber(){
+  var d = String((CUR&&CUR.mobile)||'').replace(/\D/g,'');
+  if(!d) return '';
+  if(d.length===10) d = '91'+d;
+  if(d.length===11 && d.charAt(0)==='0') d = '91'+d.slice(1);
+  return d;
+}
+function waMessage(){
+  var p = window._ggLast.price, cost = window._ggLast.cost;
+  return 'Dear '+((CUR&&CUR.clientName)||'Client')+',\n\n'+
+    'Thank you for considering Gourmet Gatherings. Please find our proposal attached.\n\n'+
+    'Event: '+((CUR&&CUR.eventType)||'')+'\n'+
+    'Date: '+((CUR&&CUR.eventDate)||'')+'\n'+
+    'Guests (MG): '+cost.pax+'\n'+
+    'Per person: '+M(p.netPP)+'\n'+
+    'Total incl. GST: '+M(p.grand)+'\n\n'+
+    'File reference: '+((CUR&&CUR.fileNumber)||'')+'\n\n'+
+    'Warm regards,\nGourmet Gatherings\nA brand of Flenbo Foodworks Pvt. Ltd\n+91 93118 77987';
+}
+function sendQuoteWhatsapp(){
+  var num = waNumber();
+  var msg = waMessage();
+  var doc;
+  try{ doc = buildQuotePdf(); }
+  catch(e){ toast(e.message||'Could not build the PDF','err'); return; }
+  var blob = doc.output('blob');
+  var file = new File([blob], quoteFileName(), {type:'application/pdf'});
+
+  // Phone / tablet: share the PDF straight into WhatsApp
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    navigator.share({files:[file], text:msg, title:'Gourmet Gatherings — Quotation'})
+      .then(function(){ toast('Shared','ok'); })
+      .catch(function(){ /* user dismissed */ });
+    return;
+  }
+  // Desktop: download the PDF, open the chat with the message ready, then attach
+  doc.save(quoteFileName());
+  var url = num ? ('https://wa.me/'+num+'?text='+encodeURIComponent(msg))
+                : ('https://web.whatsapp.com/send?text='+encodeURIComponent(msg));
+  window.open(url, '_blank');
+  toast('PDF downloaded — attach it in the WhatsApp window','ok');
 }
 
 /* ---------- save costing back onto the event ---------- */
@@ -432,8 +651,8 @@ function boot(){
   if(!$('.admin-nav')) return setTimeout(boot,400);
   injectPages();
   $('#cEvent').onchange = function(){ pick(+this.value); };
-  $('#cQuoteBtn').onclick = quoteDoc;
-  $('#cInvBtn').onclick = invoiceDoc;
+  $('#cQuoteBtn').onclick = downloadQuotePdf;
+  $('#cWaBtn').onclick = sendQuoteWhatsapp;
   $('#cSaveBtn').onclick = saveToEvent;
   $('#rBuf').onchange = renderRation;
   $('#rPack').onchange = renderRation;
