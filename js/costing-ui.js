@@ -84,6 +84,7 @@ function injectPages(){
       '<select id="cEvent" style="flex:1;min-width:250px;padding:8px 10px;border:1px solid var(--line);border-radius:8px"></select>'+
       '<button class="btn sm btn-ghost" id="cQuoteBtn">\u2193 PDF Quote</button>'+
       '<button class="btn sm" id="cWaBtn" style="background:#1f7a45;color:#fff;border-color:transparent">WhatsApp Quote</button>'+
+      '<button class="btn sm btn-ghost" id="cCopyBtn">Copy message</button>'+
       '<button class="btn sm btn-gold" id="cSaveBtn">Save to event</button>'+
     '</div>'+
     '<div id="cBody"></div>';
@@ -329,6 +330,15 @@ function renderRates(){
       }).join('')+'</tbody></table></div></div>';
 
   $$('[data-drv]').forEach(function(el){ el.onchange=function(){ st.drivers[el.dataset.drv]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  var pullBtn = $('#cPullBtn');
+  if(pullBtn) pullBtn.onclick = function(){
+    toast('Pulling…','ok');
+    C.syncFromCloud().then(function(got){
+      paintRates();
+      toast(got ? 'Rates pulled from Google Sheets' : 'Nothing saved in the sheet yet', got?'ok':'err');
+      if(CUR) render();
+    });
+  };
   $$('[data-paper]').forEach(function(el){ el.onchange=function(){ st.drivers.paper=el.value; C.save(); toast('Paper size: '+(el.value==='letter'?'US Letter':'A4'),'ok'); }; });
   $$('[data-wat]').forEach(function(el){ el.onchange=function(){ st.water[el.dataset.wat]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-season]').forEach(function(el){ el.onchange=function(){ st.water.seasons[el.dataset.season]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
@@ -741,8 +751,18 @@ function buildQuotePdf(){
 function quoteFileName(){
   return 'Gourmet-Gatherings-Quote-' + ((CUR&&CUR.fileNumber)||'event') + '.pdf';
 }
+function logThisQuote(){
+  if(!C.logQuote || !CUR || !window._ggLast) return;
+  var d = window._ggLast;
+  C.logQuote({ fileNumber:CUR.fileNumber, clientName:CUR.clientName, eventDate:CUR.eventDate,
+    eventType:CUR.eventType, pax:d.cost.pax, dishes:d.cost.lines.length,
+    cogsPP:Math.round(d.cost.cogsPP), listPP:Math.round(d.price.listPP),
+    discountPct:d.price.discountPct, netPP:Math.round(d.price.netPP),
+    net:Math.round(d.price.net), gst:Math.round(d.price.gst),
+    grand:Math.round(d.price.grand), marginPct:+d.price.marginPct.toFixed(1), by:'Admin' });
+}
 function downloadQuotePdf(){
-  try{ buildQuotePdf().save(quoteFileName()); toast('Quote PDF downloaded','ok'); }
+  try{ buildQuotePdf().save(quoteFileName()); logThisQuote(); toast('Quote PDF downloaded','ok'); }
   catch(e){ toast(e.message||'Could not build the PDF','err'); }
 }
 function waNumber(){
@@ -752,17 +772,56 @@ function waNumber(){
   if(d.length===11 && d.charAt(0)==='0') d = '91'+d.slice(1);
   return d;
 }
+function prettyEventDate(){
+  var ds = CUR && CUR.eventDate; if(!ds) return '';
+  try{
+    var d=new Date(String(ds)+'T00:00:00');
+    var day=d.getDate(), suf = day>3&&day<21 ? 'th' : ({1:'st',2:'nd',3:'rd'}[day%10]||'th');
+    var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return day+suf+' '+MON[d.getMonth()];
+  }catch(e){ return ds; }
+}
+function titleCase(t){
+  return String(t||'').toLowerCase().replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+}
 function waMessage(){
   var p = window._ggLast.price, cost = window._ggLast.cost;
-  return 'Dear '+((CUR&&CUR.clientName)||'Client')+',\n\n'+
-    'Thank you for considering Gourmet Gatherings. Please find our proposal attached.\n\n'+
-    'Event: '+((CUR&&CUR.eventType)||'')+'\n'+
-    'Date: '+((CUR&&CUR.eventDate)||'')+'\n'+
-    'Guests (MG): '+cost.pax+'\n'+
-    'Per person: '+M(p.netPP)+'\n'+
-    'Total incl. GST: '+M(p.grand)+'\n\n'+
-    'File reference: '+((CUR&&CUR.fileNumber)||'')+'\n\n'+
-    'Warm regards,\nGourmet Gatherings\nA brand of Flenbo Foodworks Pvt. Ltd\n+91 93118 77987';
+  var name = (CUR && CUR.clientName) ? String(CUR.clientName).trim() : 'there';
+  var ev   = titleCase(CUR && CUR.eventType==='OTHERS' ? (CUR.eventTypeOther||'event') : (CUR&&CUR.eventType)||'event');
+  var when = prettyEventDate();
+  var L = [];
+  L.push('Dear '+name+',');
+  L.push('');
+  L.push('Thank you for considering Gourmet Gatherings — it has been a pleasure putting this together for you.');
+  L.push('');
+  L.push('Please find our proposal attached for your '+ev+(when?' on '+when:'')+', for '+cost.pax+' guests.');
+  L.push('');
+  L.push('It covers the curated menu, everything included in the service, the commercials and our terms.');
+  L.push('');
+  L.push('*Per person: '+M(p.netPP)+'*');
+  L.push('*Total including GST: '+M(p.grand)+'*');
+  L.push('');
+  L.push('Do go through it at your convenience. We would be glad to adjust the menu or talk anything through — simply reply here or give us a call.');
+  L.push('');
+  L.push('Warm regards');
+  L.push('Customer Care');
+  L.push('Gourmet Gatherings');
+  L.push('_A Trademark Brand of Flenbo Foodworks Pvt. Ltd_');
+  L.push('+91 93118 77987');
+  if(CUR && CUR.fileNumber) L.push('Ref: File '+CUR.fileNumber);
+  return L.join('\n');
+}
+window._ggMsg = waMessage;   // exposed for quick inspection
+function copyToClipboard(txt){
+  if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(txt);
+  return new Promise(function(res,rej){
+    try{
+      var ta=document.createElement('textarea');
+      ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); res();
+    }catch(e){ rej(e); }
+  });
 }
 function sendQuoteWhatsapp(){
   var num = waNumber();
@@ -770,6 +829,7 @@ function sendQuoteWhatsapp(){
   var doc;
   try{ doc = buildQuotePdf(); }
   catch(e){ toast(e.message||'Could not build the PDF','err'); return; }
+  logThisQuote();
   var blob = doc.output('blob');
   var file = new File([blob], quoteFileName(), {type:'application/pdf'});
 
@@ -780,12 +840,16 @@ function sendQuoteWhatsapp(){
       .catch(function(){ /* user dismissed */ });
     return;
   }
-  // Desktop: download the PDF, open the chat with the message ready, then attach
+  // Desktop: WhatsApp Web will not carry pre-filled text into the caption box once a
+  // file is attached, so copy the message to the clipboard for a single paste.
   doc.save(quoteFileName());
-  var url = num ? ('https://wa.me/'+num+'?text='+encodeURIComponent(msg))
-                : ('https://web.whatsapp.com/send?text='+encodeURIComponent(msg));
-  window.open(url, '_blank');
-  toast('PDF downloaded — attach it in the WhatsApp window','ok');
+  copyToClipboard(msg).then(function(){
+    toast('PDF downloaded · message copied — attach the PDF, then paste with Ctrl+V','ok');
+  }).catch(function(){
+    toast('PDF downloaded — attach it in the WhatsApp window','ok');
+  });
+  var url = num ? ('https://wa.me/'+num) : 'https://web.whatsapp.com/';
+  setTimeout(function(){ window.open(url, '_blank'); }, 400);
 }
 
 /* ---------- save costing back onto the event ---------- */
@@ -850,12 +914,40 @@ function watchEventList(){
 }
 
 /* ---------- boot ---------- */
+function syncPill(){
+  var st = C.syncState ? C.syncState() : {status:'idle'};
+  var map = {
+    synced:  ['#1f7a45', 'Synced to Google Sheets'],
+    saving:  ['#8a6d1f', 'Saving…'],
+    offline: ['#b3261e', 'Offline — saved on this machine only'],
+    error:   ['#b3261e', 'Sync failed — saved locally'],
+    idle:    ['#8a8378', 'Not synced yet']
+  };
+  var m = map[st.status] || map.idle;
+  var extra = (st.status==='synced' && st.updatedOn)
+    ? ' · last updated ' + new Date(st.updatedOn).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
+      + (st.updatedBy? ' by '+st.updatedBy : '')
+    : '';
+  return '<span id="cSyncPill" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:'+m[0]+'">'+
+         '<span style="width:7px;height:7px;border-radius:50%;background:'+m[0]+';display:inline-block"></span>'+
+         m[1]+extra+'</span>';
+}
+function refreshSyncPill(){
+  var el = $('#cSyncPill');
+  if(el) el.outerHTML = syncPill();
+}
+
 function boot(){
   if(!$('.admin-nav')) return setTimeout(boot,400);
   injectPages();
   $('#cEvent').onchange = function(){ pick(+this.value); };
   $('#cQuoteBtn').onclick = downloadQuotePdf;
   $('#cWaBtn').onclick = sendQuoteWhatsapp;
+  $('#cCopyBtn').onclick = function(){
+    if(!CUR || !window._ggLast){ toast('Select an event first','err'); return; }
+    copyToClipboard(waMessage()).then(function(){ toast('Message copied to clipboard','ok'); })
+      .catch(function(){ toast('Could not copy — select and copy manually','err'); });
+  };
   $('#cSaveBtn').onclick = saveToEvent;
   $('#rBuf').onchange = renderRation;
   $('#rPack').onchange = renderRation;
@@ -874,7 +966,13 @@ function boot(){
     rd.onload=function(){ try{ localStorage.setItem('gg_costing_v1', rd.result); location.reload(); }catch(err){ toast('Could not read that file','err'); } };
     rd.readAsText(f);
   };
+  C.onSync = function(){ refreshSyncPill(); };
   loadEvents().then(watchEventList);
+  // pull shared rates so every machine starts from the same numbers
+  if(C.syncFromCloud) C.syncFromCloud().then(function(got){
+    refreshSyncPill();
+    if(got){ toast('Rates synced from Google Sheets','ok'); if(CUR) render(); if(PAGE==='rates') paintRates(); }
+  });
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 window.GG_COST_UI = { reload:loadEvents, render:render };

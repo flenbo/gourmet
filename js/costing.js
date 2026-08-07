@@ -53,8 +53,77 @@ function settings(){
   });
   return S;
 }
+// ---------- cloud sync (same Google Sheet as the events) ----------
+var _cloudTimer = null, _cloudState = {status:'idle', updatedOn:null, updatedBy:null};
+function cloudCfg(){
+  var st = (window.GG_STORE && window.GG_STORE.config) || null;
+  return st && st.SHEETS_ENDPOINT ? st : null;
+}
+function cloudPull(){
+  var cfg = cloudCfg();
+  if(!cfg) return Promise.resolve(null);
+  var url = cfg.SHEETS_ENDPOINT + '?action=getCosting&token=' + encodeURIComponent(cfg.SHEETS_TOKEN);
+  return fetch(url).then(function(r){ return r.json(); }).then(function(j){
+    if(!j || !j.ok || !j.settings) return null;
+    _cloudState = {status:'synced', updatedOn:j.updatedOn, updatedBy:j.updatedBy};
+    return j.settings;
+  }).catch(function(){ _cloudState.status='offline'; return null; });
+}
+function cloudPush(){
+  settings();
+  var cfg = cloudCfg();
+  if(!cfg) return Promise.resolve(false);
+  return fetch(cfg.SHEETS_ENDPOINT, {
+    method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'saveCosting', token:cfg.SHEETS_TOKEN,
+                          data:{settings:S, updatedBy:'Admin'}})
+  }).then(function(r){ return r.json(); }).then(function(j){
+    _cloudState = {status: (j&&j.ok)?'synced':'error', updatedOn:(j&&j.updatedOn)||null, updatedBy:'Admin'};
+    if(window.GG_COST && typeof window.GG_COST.onSync==='function') window.GG_COST.onSync(_cloudState);
+    return !!(j&&j.ok);
+  }).catch(function(){
+    _cloudState.status='offline';
+    if(window.GG_COST && typeof window.GG_COST.onSync==='function') window.GG_COST.onSync(_cloudState);
+    return false;
+  });
+}
+// Merge whatever the sheet holds over the local copy, then repaint.
+function syncFromCloud(){
+  settings();                     // S is lazily built — make sure it exists before merging
+  return cloudPull().then(function(remote){
+    if(!remote) return false;
+    if(remote.rates)   S.rates   = Object.assign({}, S.rates,   remote.rates);
+    if(remote.drivers) S.drivers = Object.assign({}, S.drivers, remote.drivers);
+    if(remote.labour)  S.labour  = remote.labour;
+    if(remote.water)   S.water   = Object.assign({}, S.water,   remote.water);
+    if(remote.company) S.company = Object.assign({}, S.company, remote.company);
+    try{ localStorage.setItem(LS_RATES, JSON.stringify(S)); }catch(e){}
+    if(window.GG_COST && typeof window.GG_COST.onSync==='function') window.GG_COST.onSync(_cloudState);
+    return true;
+  }).catch(function(err){
+    _cloudState.status='error';
+    if(window.console) console.warn('[GG] rate sync failed:', err);
+    return false;
+  });
+}
+function syncState(){ return _cloudState; }
+function logQuote(rec){
+  var cfg = cloudCfg();
+  if(!cfg) return Promise.resolve(false);
+  return fetch(cfg.SHEETS_ENDPOINT, {
+    method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'logQuote', token:cfg.SHEETS_TOKEN, data:rec})
+  }).then(function(r){ return r.json(); }).then(function(j){ return !!(j&&j.ok); })
+    .catch(function(){ return false; });
+}
+
 function save(){
   try{ localStorage.setItem(LS_RATES, JSON.stringify(S)); }catch(e){}
+  // debounce the network write so typing in a rate field doesn't spam the sheet
+  if(_cloudTimer) clearTimeout(_cloudTimer);
+  _cloudState.status = 'saving';
+  if(window.GG_COST && typeof window.GG_COST.onSync==='function') window.GG_COST.onSync(_cloudState);
+  _cloudTimer = setTimeout(cloudPush, 1200);
   if(window.GG_STORE && GG_STORE.setSetting) GG_STORE.setSetting('costing', S);
 }
 function resetAll(){ S = clone(DEFAULTS); save(); }
@@ -400,6 +469,10 @@ function nextInvoiceNo(){
 }
 
 window.GG_COST = {
+  syncFromCloud: syncFromCloud,
+  syncState: syncState,
+  cloudPush: cloudPush,
+  logQuote: logQuote,
   DATA:D, settings:settings, save:save, reset:resetAll, defaults:DEFAULTS,
   dishesOf:dishesOf, catHints:catHints, dishCost:dishCost, recipeFor:recipeFor, metaFor:metaFor, resolveKey:resolveKey,
   costEvent:costEvent, priceEvent:priceEvent, ration:ration, invoiceFor:invoiceFor,
