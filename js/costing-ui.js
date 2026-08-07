@@ -795,6 +795,37 @@ function rationCsv(){
   a.download='ration-'+((CUR&&CUR.fileNumber)||'event')+'.csv'; a.click();
 }
 
+
+/* ---------- "Costing" shortcut on every event card ---------- */
+function openCostingFor(fileNumber){
+  var i = EVENTS.findIndex(function(e){ return String(e.fileNumber)===String(fileNumber); });
+  if(i<0){ toast('Event not loaded yet — hit Refresh','err'); return; }
+  var nav = $$('.admin-nav button').filter(function(b){ return b.dataset.page==='costing'; })[0];
+  if(nav) nav.click();
+  var sel = $('#cEvent'); if(sel) sel.value = String(i);
+  pick(i);
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function injectCostingButtons(){
+  $$('#eventList .ev-actions').forEach(function(row){
+    if(row.querySelector('.act-costing')) return;
+    var card = row.closest('.ev-card') || row.parentElement;
+    var m = (card && card.textContent || '').match(/File\s+(\d{4,6})/);
+    if(!m) return;
+    var b = document.createElement('button');
+    b.className = 'btn sm btn-ghost act-costing';
+    b.textContent = 'Costing';
+    b.onclick = function(ev){ ev.stopPropagation(); openCostingFor(m[1]); };
+    row.appendChild(b);
+  });
+}
+function watchEventList(){
+  var list = $('#eventList'); if(!list) return setTimeout(watchEventList, 600);
+  injectCostingButtons();
+  new MutationObserver(function(){ injectCostingButtons(); })
+    .observe(list, {childList:true, subtree:true});
+}
+
 /* ---------- boot ---------- */
 function boot(){
   if(!$('.admin-nav')) return setTimeout(boot,400);
@@ -820,7 +851,7 @@ function boot(){
     rd.onload=function(){ try{ localStorage.setItem('gg_costing_v1', rd.result); location.reload(); }catch(err){ toast('Could not read that file','err'); } };
     rd.readAsText(f);
   };
-  loadEvents();
+  loadEvents().then(watchEventList);
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 window.GG_COST_UI = { reload:loadEvents, render:render };
