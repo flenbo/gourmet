@@ -306,7 +306,11 @@ function renderRates(){
      ['advancePct','Advance %'],['cardSurcharge','Card surcharge %']].map(function(d){
       return '<div class="cfield" style="grid-template-columns:1fr 90px"><label>'+d[1]+'</label>'+
              '<input type="number" step="0.5" data-drv="'+d[0]+'" value="'+st.drivers[d[0]]+'"></div>';
-    }).join('')+'</div></div>'+
+    }).join('')+
+    '<div class="cfield" style="grid-template-columns:1fr 130px"><label>Quote paper size</label>'+
+      '<select data-paper><option value="a4"'+((st.drivers.paper==='a4')?' selected':'')+'>A4 (210 × 297 mm)</option>'+
+      '<option value="letter"'+((st.drivers.paper!=='a4')?' selected':'')+'>US Letter (8.5 × 11 in)</option></select></div>'+
+    '</div><div class="cnote">Set this to match the paper in your printer. Either way the layout keeps a safe margin so the logo and GSTIN line never clip.</div></div>'+
     '<div class="cbox"><h3>Bottled water</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 18px">'+
       '<div class="cfield" style="grid-template-columns:1fr 90px"><label>Crate price ₹</label><input type="number" data-wat="cratePrice" value="'+st.water.cratePrice+'"></div>'+
       '<div class="cfield" style="grid-template-columns:1fr 90px"><label>Bottles per crate</label><input type="number" data-wat="crateSize" value="'+st.water.crateSize+'"></div>'+
@@ -325,6 +329,7 @@ function renderRates(){
       }).join('')+'</tbody></table></div></div>';
 
   $$('[data-drv]').forEach(function(el){ el.onchange=function(){ st.drivers[el.dataset.drv]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-paper]').forEach(function(el){ el.onchange=function(){ st.drivers.paper=el.value; C.save(); toast('Paper size: '+(el.value==='letter'?'US Letter':'A4'),'ok'); }; });
   $$('[data-wat]').forEach(function(el){ el.onchange=function(){ st.water[el.dataset.wat]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-season]').forEach(function(el){ el.onchange=function(){ st.water.seasons[el.dataset.season]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-rate]').forEach(function(el){ el.onchange=function(){ st.rates[el.dataset.rate].rate=+el.value||0; C.save(); toast('Rate saved','ok'); if(CUR) render(); }; });
@@ -382,9 +387,14 @@ function buildQuotePdf(){
   var st=C.settings(), co=st.company, dr=st.drivers;
   var cost=window._ggLast.cost, p=window._ggLast.price;
   var LOGO = window.GG_LOGO || null;
-  var doc = new window.jspdf.jsPDF({unit:'pt', format:'a4'});
+  var paper = (dr.paper==='a4') ? 'a4' : 'letter';   // Letter is the house standard
+  var doc = new window.jspdf.jsPDF({unit:'pt', format:paper});
   var W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), Mg=56, y=0;
   var INK=[26,24,22], BODY=[64,60,56];
+  // Printers set to US Letter lose ~50pt off an A4 page. Keep all ink inside a
+  // safe band so nothing clips whichever paper size is loaded.
+  var FOOT = 66;          // footer rule sits this far above the page edge
+  var TOPSAFE = 26;       // no ink above this line
 
   /* ---------- formatting ---------- */
   function ord(d){ return d+(d>3&&d<21?'th':{1:'st',2:'nd',3:'rd'}[d%10]||'th'); }
@@ -416,25 +426,25 @@ function buildQuotePdf(){
   /* ---------- chrome ---------- */
   var pageNo = 0, curSub='CATERING PROPOSAL';
   function footer(){
-    doc.setDrawColor(226,222,214); doc.setLineWidth(.5); doc.line(Mg, H-52, W-Mg, H-52);
+    doc.setDrawColor(226,222,214); doc.setLineWidth(.5); doc.line(Mg, H-FOOT, W-Mg, H-FOOT);
     doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(150,143,133);
-    doc.text('Gourmet Gatherings  ·  A Trademark Brand of Flenbo Foodworks Pvt. Ltd', Mg, H-38);
-    doc.text(co.phone2+'  ·  '+co.email2+'  ·  @gatherings.gourmet', W-Mg, H-38, {align:'right'});
+    doc.text('Gourmet Gatherings  ·  A Trademark Brand of Flenbo Foodworks Pvt. Ltd', Mg, H-FOOT+14);
+    doc.text(co.phone2+'  ·  '+co.email2+'  ·  @gatherings.gourmet', W-Mg, H-FOOT+14, {align:'right'});
     doc.setFontSize(6.8); doc.setTextColor(RED[0],RED[1],RED[2]);
-    doc.text('GSTIN '+co.gstin+'     ·     '+co.udyam, W/2, H-25, {align:'center'});
+    doc.text('GSTIN '+co.gstin+'     ·     '+co.udyam, W/2, H-FOOT+27, {align:'center'});
     doc.setTextColor(170,164,154);
-    doc.text(('0'+pageNo).slice(-2), W-Mg, H-25, {align:'right'});
+    doc.text(('0'+pageNo).slice(-2), W-Mg, H-FOOT+27, {align:'right'});
   }
-  function ensure(sp){ if(y+sp > H-72){ footer(); doc.addPage(); header(curSub+' (CONTD.)'); } }
+  function ensure(sp){ if(y+sp > H-FOOT-22){ footer(); doc.addPage(); header(curSub+' (CONTD.)'); } }
   function header(sub){
     pageNo++;
     if(sub.indexOf('(CONTD.)')<0) curSub=sub;
-    var BAND=126, SUB_Y=104;
+    var BAND=130, SUB_Y=108;
     doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,BAND,'F');
     doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.8); doc.line(0,BAND,W,BAND);
     if(LOGO && LOGO.full){
       var lw=162, lh=lw*(LOGO.fullH/LOGO.fullW);
-      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, Math.max(10,(SUB_Y-14-lh)/2), lw, lh); }catch(e){}
+      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, Math.max(TOPSAFE,(SUB_Y-14-lh)/2), lw, lh); }catch(e){}
     }
     if(sub){
       doc.setFont('helvetica','bold'); doc.setFontSize(9.6); doc.setTextColor(148,141,131);
@@ -444,13 +454,13 @@ function buildQuotePdf(){
       doc.line(W/2-tw2/2-26, SUB_Y-3.5, W/2-tw2/2-10, SUB_Y-3.5);
       doc.line(W/2+tw2/2+10, SUB_Y-3.5, W/2+tw2/2+26, SUB_Y-3.5);
     }
-    y = 158;
+    y = 160;
   }
   function sectionTitle(t){
-    ensure(44); y += 6;
+    ensure(40); y += 4;
     doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.6); doc.line(Mg, y, Mg+20, y);
     doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(INK[0],INK[1],INK[2]);
-    doc.text(t.toUpperCase(), Mg+30, y+4.5, {charSpace:0.7}); y += 18;
+    doc.text(t.toUpperCase(), Mg+30, y+4.5, {charSpace:0.7}); y += 16;
   }
   function kv(k,v){
     if(v===undefined||v===null||v==='') v='—'; v=String(v); ensure(17);
@@ -470,19 +480,19 @@ function buildQuotePdf(){
   }
   function bulletsHeight(items){
     doc.setFont('helvetica','normal'); doc.setFontSize(9.4);
-    var h=0; items.forEach(function(t){ h += doc.splitTextToSize(t, W-Mg-Mg-20).length*11.9 + 3; });
+    var h=0; items.forEach(function(t){ h += doc.splitTextToSize(t, W-Mg-Mg-20).length*11.3 + 2; });
     return h;
   }
   function bullets(items, numbered){
     doc.setFont('helvetica','normal'); doc.setFontSize(9.4);
     items.forEach(function(t,i){
       var l=doc.splitTextToSize(t, W-Mg-Mg-20);
-      ensure(l.length*11.9+4);
+      ensure(l.length*11.3+3);
       doc.setTextColor(RED[0],RED[1],RED[2]); doc.setFontSize(numbered?9:8);
       doc.text(numbered?(i+1)+'.':'•', Mg+3, y);
       doc.setFontSize(9.4); doc.setTextColor(BODY[0],BODY[1],BODY[2]);
-      l.forEach(function(ln,j){ doc.text(ln, Mg+20, y + j*11.9); });
-      y += l.length*11.9 + 3;
+      l.forEach(function(ln,j){ doc.text(ln, Mg+20, y + j*11.3); });
+      y += l.length*11.3 + 2;
     });
   }
   function headedList(heading, items, numbered){
@@ -502,7 +512,7 @@ function buildQuotePdf(){
 
   /* ================= PAGE 1 : COVER LETTER ================= */
   header('');
-  y = 150;
+  y = 154;
   doc.setFont('helvetica','bold'); doc.setFontSize(9.4); doc.setTextColor(INK[0],INK[1],INK[2]);
   doc.text(letterDate(), Mg, y); y += 26;
 
@@ -621,7 +631,7 @@ function buildQuotePdf(){
   GRID.forEach(function(br){
     var cols=br.map(function(c){ return byCat[c[1]]||[]; });
     var rows=Math.max(2, cols[0].length, cols[1].length, cols[2].length);
-    if(y + hRow + rows*bRow + 12 > H-80){ footer(); doc.addPage(); header('MENU OFFERING (CONTD.)'); }
+    if(y + hRow + rows*bRow + 12 > H-FOOT-22){ footer(); doc.addPage(); header('MENU OFFERING (CONTD.)'); }
     br.forEach(function(c,i){ cell(Mg+i*cw, cw, hRow, c[0], 'head'); });
     y += hRow;
     for(var r=0;r<rows;r++){
