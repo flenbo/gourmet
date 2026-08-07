@@ -383,93 +383,180 @@ function buildQuotePdf(){
   var cost=window._ggLast.cost, p=window._ggLast.price;
   var LOGO = window.GG_LOGO || null;
   var doc = new window.jspdf.jsPDF({unit:'pt', format:'a4'});
-  var W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), Mg=48, y=0;
+  var W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), Mg=56, y=0;
+  var INK=[26,24,22], BODY=[64,60,56];
 
+  /* ---------- formatting ---------- */
+  function ord(d){ return d+(d>3&&d<21?'th':{1:'st',2:'nd',3:'rd'}[d%10]||'th'); }
+  var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  function letterDate(){ var d=new Date();
+    return (MON[d.getMonth()]+' '+ord(d.getDate())+"' "+d.getFullYear()).toUpperCase(); }
+  function eventDateLong(ds){ if(!ds) return 'your upcoming event';
+    try{ var d=new Date(String(ds)+'T00:00:00');
+      return ord(d.getDate())+' '+MON[d.getMonth()]+"'"+String(d.getFullYear()).slice(2); }catch(e){ return ds; } }
   function fmtD(ds){ if(!ds) return '—';
     try{ return new Date(String(ds)+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}); }catch(e){ return ds; } }
   function rs(n){ return 'Rs ' + Math.round(n||0).toLocaleString('en-IN'); }
-  function footer(){
-    doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(.5); doc.line(Mg,H-46,W-Mg,H-46);
-    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-    doc.text('Gourmet Gatherings  ·  Operated by Flenbo Foodworks Private Limited', Mg, H-33);
-    doc.text('+91 93118 77987  ·  customercare@flenbo.com  ·  @gatherings.gourmet', W-Mg, H-33, {align:'right'});
-    doc.setFontSize(7); doc.setTextColor(RED[0],RED[1],RED[2]);
-    doc.text('GSTIN: '+co.gstin+'     ·     '+co.udyam, W/2, H-19, {align:'center'});
+  // "Mr. Dikshant Kalra" -> "Mr. Kalra"; plain names are used as given
+  function salutation(){
+    var n = String(CUR.clientName||'').trim();
+    if(!n) return 'Sir / Madam';
+    var m = n.match(/^(Mr|Mrs|Ms|Miss|Dr|Prof)\.?\s+(.*)$/i);
+    if(m){ var parts=m[2].trim().split(/\s+/); return m[1].replace(/\.$/,'')+'. '+parts[parts.length-1]; }
+    return n;
   }
-  var curSub='CATERING PROPOSAL';
-  function ensure(sp){ if(y+sp > H-60){ footer(); doc.addPage(); brandHeader(curSub+' (CONTD.)'); } }
-  function brandHeader(sub){
-    if(sub.indexOf('(CONTD.)')<0) curSub=sub;
-    var BAND=124, SUB_Y=104;
-    doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,BAND,'F');
-    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(2); doc.line(0,BAND,W,BAND);
-    if(LOGO && LOGO.full){
-      var lw=158, lh=lw*(LOGO.fullH/LOGO.fullW);
-      // centre the mark in the space above the subtitle
-      var top = Math.max(10, (SUB_Y - 12 - lh)/2);
-      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, top, lw, lh); }catch(e){}
-    }
-    doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-    doc.text(sub, W/2, SUB_Y, {align:'center', charSpace:1.1});
-    y = 152;
-  }
-  function sectionTitle(t){
-    ensure(40); y+=6;
-    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.4); doc.line(Mg,y,Mg+22,y);
-    doc.setFont('times','bold'); doc.setFontSize(12.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-    doc.text(t.toUpperCase(), Mg+30, y+4); y+=18;
-  }
-  function kv(k,v){
-    if(v===undefined||v===null||v==='') v='—'; v=String(v); ensure(16);
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-    doc.text(k.toUpperCase(), Mg, y);
-    doc.setFontSize(10); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-    var l=doc.splitTextToSize(v, W-Mg-Mg-140); doc.text(l, Mg+140, y);
-    y += Math.max(14, l.length*12);
-  }
-  function bulletsHeight(items){
-    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
-    var h=0; items.forEach(function(t){ h += doc.splitTextToSize(t, W-Mg-Mg-18).length*12 + 3; });
-    return h;
-  }
-  // heading + list must not be split across a page break
-  function headedList(heading, items, numbered){
-    var need = (heading?14:0) + bulletsHeight(items);
-    ensure(Math.min(need, H - 220));
-    if(heading){
-      doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-      doc.text(heading, Mg, y); y += 14;
-    }
-    bullets(items, numbered);
-  }
-  function bullets(items, numbered){
-    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
-    items.forEach(function(t,i){
-      var l=doc.splitTextToSize(t, W-Mg-Mg-18);
-      ensure(l.length*12+4);
-      doc.setTextColor(RED[0],RED[1],RED[2]);
-      doc.text(numbered?(i+1)+'.':'•', Mg+2, y);
-      doc.setTextColor(55,50,46);
-      doc.text(l, Mg+18, y); y += l.length*12 + 3;
-    });
-  }
-  function para(t,size){
-    doc.setFont('helvetica','normal'); doc.setFontSize(size||9.5); doc.setTextColor(55,50,46);
-    var l=doc.splitTextToSize(t, W-Mg-Mg); ensure(l.length*12+4); doc.text(l, Mg, y); y += l.length*12 + 6;
+  function addressLines(){
+    var out=[];
+    if(CUR.venue) out.push(String(CUR.venue));
+    else if(CUR.location) out.push(String(CUR.location));
+    if(CUR.mobile) out.push('Mobile: '+CUR.mobile);
+    return out;
   }
 
-  /* ---- page 1 : proposal + commercials ---- */
-  brandHeader('CATERING PROPOSAL');
-  // file number badge
-  doc.setFillColor(250,247,241); doc.roundedRect(Mg, y-12, 200, 34, 5,5,'F');
-  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-  doc.text('FILE NUMBER', Mg+14, y+1);
-  doc.setFont('times','bold'); doc.setFontSize(14); doc.setTextColor(RED[0],RED[1],RED[2]);
-  doc.text(String(CUR.fileNumber||'—'), Mg+14, y+17);
-  doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-  doc.text('Quotation date: '+new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}), W-Mg, y+1, {align:'right'});
-  doc.text('Valid for 15 days from date of issue', W-Mg, y+13, {align:'right'});
-  y += 40;
+  /* ---------- chrome ---------- */
+  var pageNo = 0, curSub='CATERING PROPOSAL';
+  function footer(){
+    doc.setDrawColor(226,222,214); doc.setLineWidth(.5); doc.line(Mg, H-52, W-Mg, H-52);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(150,143,133);
+    doc.text('Gourmet Gatherings  ·  A Trademark Brand of Flenbo Foodworks Pvt. Ltd', Mg, H-38);
+    doc.text(co.phone2+'  ·  '+co.email2+'  ·  @gatherings.gourmet', W-Mg, H-38, {align:'right'});
+    doc.setFontSize(6.8); doc.setTextColor(RED[0],RED[1],RED[2]);
+    doc.text('GSTIN '+co.gstin+'     ·     '+co.udyam, Mg, H-25);
+    doc.setTextColor(170,164,154);
+    doc.text(('0'+pageNo).slice(-2), W-Mg, H-25, {align:'right'});
+  }
+  function ensure(sp){ if(y+sp > H-72){ footer(); doc.addPage(); header(curSub+' (CONTD.)'); } }
+  function header(sub){
+    pageNo++;
+    if(sub.indexOf('(CONTD.)')<0) curSub=sub;
+    var BAND=126, SUB_Y=104;
+    doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,BAND,'F');
+    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.8); doc.line(0,BAND,W,BAND);
+    if(LOGO && LOGO.full){
+      var lw=162, lh=lw*(LOGO.fullH/LOGO.fullW);
+      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, Math.max(10,(SUB_Y-14-lh)/2), lw, lh); }catch(e){}
+    }
+    if(sub){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.6); doc.setTextColor(148,141,131);
+      doc.text(sub, W/2, SUB_Y, {align:'center', charSpace:2.2});
+      doc.setDrawColor(228,224,216); doc.setLineWidth(.5);
+      var tw2 = doc.getTextWidth(sub) + sub.length*2.2;
+      doc.line(W/2-tw2/2-26, SUB_Y-3.5, W/2-tw2/2-10, SUB_Y-3.5);
+      doc.line(W/2+tw2/2+10, SUB_Y-3.5, W/2+tw2/2+26, SUB_Y-3.5);
+    }
+    y = 158;
+  }
+  function sectionTitle(t){
+    ensure(44); y += 6;
+    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(1.6); doc.line(Mg, y, Mg+20, y);
+    doc.setFont('times','bold'); doc.setFontSize(13); doc.setTextColor(INK[0],INK[1],INK[2]);
+    doc.text(t.toUpperCase(), Mg+30, y+4.5, {charSpace:0.7}); y += 18;
+  }
+  function kv(k,v){
+    if(v===undefined||v===null||v==='') v='—'; v=String(v); ensure(17);
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.4); doc.setTextColor(158,151,141);
+    doc.text(k.toUpperCase(), Mg, y, {charSpace:0.7});
+    doc.setFontSize(9.8); doc.setTextColor(INK[0],INK[1],INK[2]);
+    var l=doc.splitTextToSize(v, W-Mg-Mg-150); doc.text(l, Mg+150, y);
+    y += Math.max(15.5, l.length*12.5);
+  }
+  function para(t,size,lead){
+    doc.setFont('helvetica','normal'); doc.setFontSize(size||9.6); doc.setTextColor(BODY[0],BODY[1],BODY[2]);
+    var lh = lead||13.6;
+    var l=doc.splitTextToSize(t, W-Mg-Mg);
+    ensure(l.length*lh+4);
+    l.forEach(function(ln){ doc.text(ln, Mg, y); y += lh; });
+    y += 6;
+  }
+  function bulletsHeight(items){
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.4);
+    var h=0; items.forEach(function(t){ h += doc.splitTextToSize(t, W-Mg-Mg-20).length*11.9 + 3; });
+    return h;
+  }
+  function bullets(items, numbered){
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.4);
+    items.forEach(function(t,i){
+      var l=doc.splitTextToSize(t, W-Mg-Mg-20);
+      ensure(l.length*11.9+4);
+      doc.setTextColor(RED[0],RED[1],RED[2]); doc.setFontSize(numbered?9:8);
+      doc.text(numbered?(i+1)+'.':'•', Mg+3, y);
+      doc.setFontSize(9.4); doc.setTextColor(BODY[0],BODY[1],BODY[2]);
+      l.forEach(function(ln,j){ doc.text(ln, Mg+20, y + j*11.9); });
+      y += l.length*11.9 + 3;
+    });
+  }
+  function headedList(heading, items, numbered){
+    ensure(Math.min((heading?16:0)+bulletsHeight(items), H-240));
+    if(heading){ doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(INK[0],INK[1],INK[2]);
+      doc.text(heading, Mg, y); y += 14; }
+    bullets(items, numbered);
+  }
+
+  var HIGHLIGHTS = [
+    'Operated by a passionate team of culinary professionals and hospitality experts',
+    'Multi-brand cloud kitchens with high operational standards',
+    'Kitchens certified with ISO 9001, ISO 22000, and HACCP for food safety and quality assurance',
+    'Capacity to manage events from 20 to 2000+ guests with on-site and off-site setups',
+    'Wide range of menu themes including North Indian, Asian, Continental, Fusion, and Live Counter formats.'
+  ];
+
+  /* ================= PAGE 1 : COVER LETTER ================= */
+  header('');
+  y = 150;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.4); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.text(letterDate(), Mg, y); y += 26;
+
+  doc.setFont('helvetica','normal'); doc.setFontSize(9.6); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.text('To,', Mg, y); y += 14;
+  doc.setFont('helvetica','bold');
+  doc.text(String(CUR.clientName||'Valued Client'), Mg, y); y += 13.5;
+  doc.setFont('helvetica','normal'); doc.setTextColor(BODY[0],BODY[1],BODY[2]);
+  addressLines().forEach(function(l){ doc.text(l, Mg, y); y += 13; });
+  y += 16;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(10.2); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.splitTextToSize('Subject: Proposal For Organizing Your Upcoming Event dtd. '+eventDateLong(CUR.eventDate),
+                      W-Mg-Mg).forEach(function(l){ doc.text(l, Mg, y); y += 14; });
+  y += 16;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.8);
+  doc.text('Dear '+salutation()+',', Mg, y); y += 20;
+
+  para('We are delighted to submit our proposal to take up and organize your upcoming event dtd. '+
+       eventDateLong(CUR.eventDate)+'. Please find enclosed the detailed annexures covering the event format, '+
+       'curated menu options, serving style and other deliverables for your kind perusal.');
+  para('At Flenbo Foodworks, we specialize in curated culinary experiences through our flagship catering brand '+
+       'Gourmet Gatherings, as well as other innovative food verticals. Whether it’s a private celebration, '+
+       'a corporate gathering, or a social function, we pride ourselves on delivering excellence, personalization, '+
+       'and seamless execution.');
+  y += 2;
+  headedList('Some highlights about us:', HIGHLIGHTS);
+  y += 6;
+  para('Basis your menu choice, we are happy to share our commercial proposal including deliverables. For any '+
+       'further clarification or discussion, please feel free to reach out directly. We take a collaborative '+
+       'approach and are open to any suggestions, customizations, or special requirements you may have.');
+  para('We would be honoured to be a part of your event and look forward to the opportunity to serve you.');
+  y += 24;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9.6); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.text('Sincerely,', Mg, y); y += 34;          // room for a signature
+  doc.setDrawColor(226,222,214); doc.setLineWidth(.5); doc.line(Mg, y, Mg+150, y); y += 13;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.6);
+  doc.text(co.signatory, Mg, y); y += 12;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.4); doc.setTextColor(150,143,133);
+  doc.text(co.signatoryRole+', '+co.name, Mg, y);
+  footer();
+
+  /* ================= PAGE 2 : EVENT DETAILS ================= */
+  doc.addPage(); header('EVENT DETAILS');
+  doc.setFillColor(250,247,241); doc.roundedRect(Mg, y-13, 190, 36, 5,5,'F');
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.2); doc.setTextColor(158,151,141);
+  doc.text('FILE NUMBER', Mg+15, y+1, {charSpace:0.7});
+  doc.setFont('times','bold'); doc.setFontSize(15); doc.setTextColor(RED[0],RED[1],RED[2]);
+  doc.text(String(CUR.fileNumber||'—'), Mg+15, y+18);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.6); doc.setTextColor(158,151,141);
+  doc.text('Quotation date: '+fmtD(new Date().toISOString().slice(0,10)), W-Mg, y+2, {align:'right'});
+  doc.text('Valid for 15 days from date of issue', W-Mg, y+14, {align:'right'});
+  y += 44;
 
   sectionTitle('Client Details');
   kv('Client name', CUR.clientName);
@@ -482,42 +569,11 @@ function buildQuotePdf(){
   kv('Event slot', CUR.eventSlot);
   if(CUR.eventTime) kv('Event time', CUR.eventTime);
   if(CUR.occasion) kv('Occasion', CUR.occasion);
-  kv('Guest count / MG', cost.pax + ' guests');
+  kv('Guest count / MG', cost.pax+' guests');
   kv('Dietary preference', CUR.dietary);
   kv('Event location', CUR.location);
 
-  sectionTitle('Commercials');
-  var perHead=p.listPP, gross=perHead*cost.pax, discAmt=gross-p.net, afterD=p.net, total=afterD+p.gst;
-  var rowH=21, tw=W-Mg-Mg, cwA=tw*0.56, cwB=tw*0.20, cwC=tw*0.24;
-  function crow(a,b,c,o){
-    o=o||{}; ensure(rowH+4);
-    if(o.fill){ doc.setFillColor(250,247,241); doc.rect(Mg,y-13,tw,rowH,'F'); }
-    if(o.dark){ doc.setFillColor(CHAR[0],CHAR[1],CHAR[2]); doc.rect(Mg,y-13,tw,rowH,'F'); }
-    doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(.5); doc.rect(Mg,y-13,tw,rowH);
-    doc.setFont('helvetica', (o.bold||o.dark)?'bold':'normal'); doc.setFontSize(o.head?8:9.5);
-    if(o.dark) doc.setTextColor(255,255,255);
-    else if(o.head) doc.setTextColor(RED[0],RED[1],RED[2]);
-    else doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-    doc.text(String(a), Mg+9, y);
-    doc.text(String(b), Mg+cwA+cwB-9, y, {align:'right'});
-    doc.text(String(c), Mg+tw-9, y, {align:'right'});
-    y += rowH;
-  }
-  y += 4;
-  crow('Particulars','Per person','Amount',{head:true,fill:true,bold:true});
-  crow('Custom catering package  ('+cost.pax+' guests)', rs(perHead), rs(gross));
-  if(p.discountPct>0){
-    crow('Less: special discount ('+String(p.discountPct.toFixed(1)).replace(/\.0$/,'')+'%)','','- '+rs(discAmt));
-    crow('Total after discount', rs(afterD/cost.pax), rs(afterD), {bold:true});
-  }
-  crow('GST @ '+dr.gst+'%','', rs(p.gst));
-  crow('TOTAL PAYABLE', rs(total/cost.pax), rs(total), {dark:true});
-  y += 12;
-  doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-  var wl=doc.splitTextToSize('INR: '+C.words(total).replace(' only',' Only'), tw);
-  ensure(wl.length*12+6); doc.text(wl, Mg, y); y += wl.length*12 + 10;
-
-  sectionTitle('Inclusions');
+  sectionTitle('Service Inclusions');
   bullets([
     'Complete food as per the enclosed menu, freshly prepared',
     'Professional chef, stewards and cleaning staff',
@@ -533,89 +589,126 @@ function buildQuotePdf(){
   ]);
   footer();
 
-  /* ---- page 2 : menu, three-column grid ---- */
-  doc.addPage(); brandHeader('MENU OFFERING');
+  /* ================= PAGE 3 : MENU GRID ================= */
+  doc.addPage(); header('MENU OFFERING');
   var byCat={}; cost.lines.forEach(function(l){ (byCat[l.cat]=byCat[l.cat]||[]).push(l.name); });
-
-  // fixed layout, three courses across — matches the printed proposal
   var GRID = [
-    [['STARTERS','Appetizers/Starters'], ['MAINS','Main Course'],        ['SALADS','Salads']],
-    [['CRISPY BITES','Crispy Bites'],    ['RICE','Rice'],                ['SOUPS','Soups']],
-    [['LENTILS','Lentils'],              ['ASSORTED BREADS','Breads'],   ['DESSERTS','Desserts']],
-    [['LIVE COUNTERS','Live Counters'],  ['BEVERAGES','Beverages'],      ['CURD','Curd Preparations']]
+    [['STARTERS','Appetizers/Starters'], ['MAINS','Main Course'],      ['SALADS','Salads']],
+    [['CRISPY BITES','Crispy Bites'],    ['RICE','Rice'],              ['SOUPS','Soups']],
+    [['LENTILS','Lentils'],              ['ASSORTED BREADS','Breads'], ['DESSERTS','Desserts']],
+    [['LIVE COUNTERS','Live Counters'],  ['BEVERAGES','Beverages'],    ['CURD','Curd Preparations']]
   ];
-  var placed = {};
-  GRID.forEach(function(r){ r.forEach(function(c){ placed[c[1]] = 1; }); });
-  // anything outside the fixed grid gets its own block row so nothing is dropped
-  var extra = Object.keys(byCat).filter(function(k){ return !placed[k]; });
+  var placed={}; GRID.forEach(function(r){ r.forEach(function(c){ placed[c[1]]=1; }); });
+  var extra=Object.keys(byCat).filter(function(k){ return !placed[k]; });
   while(extra.length){ GRID.push(extra.splice(0,3).map(function(k){ return [k.toUpperCase(), k]; })); }
 
-  var HDR_FILL=[232,233,248], HDR_TXT=[35,38,84], CELL_LINE=[186,190,220];
-  var gw = W - Mg - Mg, cw = gw/3, hRow = 19, bRow = 17;
-
-  function drawCell(x, w, h, txt, isHead){
-    if(isHead){ doc.setFillColor(HDR_FILL[0],HDR_FILL[1],HDR_FILL[2]); doc.rect(x, y, w, h, 'F'); }
-    doc.setDrawColor(CELL_LINE[0],CELL_LINE[1],CELL_LINE[2]); doc.setLineWidth(0.6);
-    doc.rect(x, y, w, h);
+  var HF=[247,245,250], HT=[64,58,96], CL=[224,220,232], ZEB=[252,251,253];
+  var gw=W-Mg-Mg, cw=gw/3, hRow=20, bRow=17.5;
+  function cell(x,w,h,txt,mode,zebra){
+    if(mode==='head'){ doc.setFillColor(HF[0],HF[1],HF[2]); doc.rect(x,y,w,h,'F'); }
+    else if(zebra){ doc.setFillColor(ZEB[0],ZEB[1],ZEB[2]); doc.rect(x,y,w,h,'F'); }
+    doc.setDrawColor(CL[0],CL[1],CL[2]); doc.setLineWidth(.55); doc.rect(x,y,w,h);
     if(!txt) return;
-    doc.setFont('helvetica', isHead?'bold':'normal');
-    doc.setFontSize(isHead?7.6:7.4);
-    if(isHead) doc.setTextColor(HDR_TXT[0],HDR_TXT[1],HDR_TXT[2]);
-    else doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-    var lines = doc.splitTextToSize(String(txt).toUpperCase(), w-10);
-    if(lines.length>2) lines = lines.slice(0,2);
-    var ty = y + h/2 - ((lines.length-1)*7)/2 + 2.4;
-    lines.forEach(function(l,i){ doc.text(l, x + w/2, ty + i*7.4, {align:'center'}); });
+    doc.setFont('helvetica', mode==='head'?'bold':'normal');
+    doc.setFontSize(mode==='head'?7.5:7.5);
+    if(mode==='head'){ doc.setTextColor(HT[0],HT[1],HT[2]); }
+    else doc.setTextColor(INK[0],INK[1],INK[2]);
+    var l=doc.splitTextToSize(String(txt).toUpperCase(), w-12);
+    if(l.length>2) l=l.slice(0,2);
+    var ty=y+h/2-((l.length-1)*7)/2+2.4;
+    l.forEach(function(ln,i){ doc.text(ln, x+w/2, ty+i*7.4, {align:'center', charSpace: mode==='head'?0.8:0}); });
   }
-
-  GRID.forEach(function(blockRow){
-    var cols = blockRow.map(function(c){ return (byCat[c[1]] || []); });
-    var rows = Math.max(2, cols[0].length, cols[1].length, cols[2].length);
-    var blockH = hRow + rows*bRow + 10;
-    if(y + blockH > H - 70){ footer(); doc.addPage(); brandHeader('MENU OFFERING (CONTD.)'); }
-    // header strip
-    blockRow.forEach(function(c,i){ drawCell(Mg + i*cw, cw, hRow, c[0], true); });
+  GRID.forEach(function(br){
+    var cols=br.map(function(c){ return byCat[c[1]]||[]; });
+    var rows=Math.max(2, cols[0].length, cols[1].length, cols[2].length);
+    if(y + hRow + rows*bRow + 12 > H-80){ footer(); doc.addPage(); header('MENU OFFERING (CONTD.)'); }
+    br.forEach(function(c,i){ cell(Mg+i*cw, cw, hRow, c[0], 'head'); });
     y += hRow;
-    // body
-    for(var r=0; r<rows; r++){
-      for(var i=0; i<3; i++){ drawCell(Mg + i*cw, cw, bRow, cols[i][r] || '', false); }
+    for(var r=0;r<rows;r++){
+      for(var i=0;i<3;i++) cell(Mg+i*cw, cw, bRow, cols[i][r]||'', 'body', r%2===1);
       y += bRow;
     }
-    y += 10;
+    y += 12;
   });
-
-  if(CUR.notes){ y += 4; sectionTitle('Additional Notes'); para(String(CUR.notes)); }
+  if(CUR.notes){ y+=4; sectionTitle('Additional Notes'); para(String(CUR.notes)); }
   footer();
 
-  /* ---- pages 3+ : terms ---- */
-  doc.addPage(); brandHeader('TERMS & CONDITIONS');
-  para("Gourmet Gatherings is Delhi NCR's premium culinary and experiential hospitality brand, operated by Flenbo Foodworks Private Limited. Whether it's a private celebration, a corporate gathering, or a social function, we pride ourselves on delivering excellence, personalization, and seamless execution.");
-  y+=2;
-  headedList('Some highlights about us:', ['Operated by a passionate team of culinary professionals and hospitality experts',
-    'Multi-brand cloud kitchens with high operational standards',
-    'Kitchens certified with ISO 9001, ISO 22000, and HACCP for food safety and quality assurance',
-    'Capacity to manage events from 20 to 2000+ guests with on-site and off-site setups',
-    'Wide range of menu themes including North Indian, Asian, Continental, Fusion, and Live Counter formats.']);
-  y+=4;
-  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-  ensure(16); doc.text('Order confirmation in the form of Advance Payment implies acceptance of these terms:', Mg, y, {maxWidth:W-Mg-Mg}); y+=18;
+  /* ================= PAGE 4 : COMMERCIALS ================= */
+  doc.addPage(); header('COMMERCIALS');
+  var perHead=p.listPP, gross=perHead*cost.pax, discAmt=gross-p.net, afterD=p.net, total=afterD+p.gst;
+  var tw=W-Mg-Mg, cwA=tw*0.54, cwB=tw*0.22;
+  function crow(a,b,c,o){
+    o=o||{}; ensure(26);
+    var h=o.dark?27:23;
+    if(o.dark){ doc.setFillColor(INK[0],INK[1],INK[2]); doc.rect(Mg,y-15,tw,h,'F'); }
+    else if(o.head){ doc.setFillColor(250,247,241); doc.rect(Mg,y-15,tw,h,'F'); }
+    doc.setDrawColor(228,224,216); doc.setLineWidth(.5);
+    doc.line(Mg, y-15+h, Mg+tw, y-15+h);
+    doc.setFont('helvetica',(o.bold||o.dark||o.head)?'bold':'normal');
+    doc.setFontSize(o.head?7.6:(o.dark?10.2:9.6));
+    if(o.dark) doc.setTextColor(255,255,255);
+    else if(o.head) doc.setTextColor(158,151,141);
+    else doc.setTextColor(INK[0],INK[1],INK[2]);
+    doc.text(String(a), Mg+12, y, o.head?{charSpace:0.7}:undefined);
+    doc.text(String(b), Mg+cwA+cwB-12, y, {align:'right'});
+    doc.text(String(c), Mg+tw-12, y, {align:'right'});
+    y += h;
+  }
+  y += 6;
+  crow('PARTICULARS','PER PERSON','AMOUNT',{head:true});
+  crow('Custom catering package  ('+cost.pax+' guests)', rs(perHead), rs(gross));
+  if(p.discountPct>0){
+    crow('Less: special discount ('+String(p.discountPct.toFixed(1)).replace(/\.0$/,'')+'%)','','- '+rs(discAmt));
+    crow('Total after discount', rs(afterD/cost.pax), rs(afterD), {bold:true});
+  }
+  crow('GST @ '+dr.gst+'%','', rs(p.gst));
+  crow('TOTAL PAYABLE', rs(total/cost.pax), rs(total), {dark:true});
+  y += 16;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.2); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.splitTextToSize('INR: '+C.words(total).replace(' only',' Only'), tw).forEach(function(l){
+    ensure(14); doc.text(l, Mg, y); y += 13; });
+  y += 18;
+  sectionTitle('Payment Schedule');
+  bullets([
+    String(dr.advancePct)+'% advance on confirmation of the order',
+    'Balance '+String(100-dr.advancePct)+'% on the day of the event, before team demobilization',
+    'Credit card payments attract an additional '+dr.cardSurcharge+'% on the invoice amount'
+  ]);
+  y += 4;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(150,143,133);
+  doc.splitTextToSize('This proposal is valid for 15 days from the date of issue. Detailed Terms & Conditions follow on the next pages.', tw)
+    .forEach(function(l){ ensure(12); doc.text(l, Mg, y); y += 11; });
+  footer();
+
+  /* ================= PAGES 5+ : TERMS ================= */
+  doc.addPage(); header('TERMS & CONDITIONS');
+  para("Gourmet Gatherings is Delhi NCR's premium culinary and experiential hospitality brand, operated by Flenbo "+
+       "Foodworks Private Limited. Whether it's a private celebration, a corporate gathering, or a social function, "+
+       "we pride ourselves on delivering excellence, personalization, and seamless execution.");
+  y += 2;
+  headedList('Some highlights about us:', HIGHLIGHTS);
+  y += 6;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(INK[0],INK[1],INK[2]);
+  ensure(18);
+  doc.splitTextToSize('Order confirmation in the form of Advance Payment implies acceptance of these terms:', W-Mg-Mg)
+    .forEach(function(l){ doc.text(l, Mg, y); y += 13; });
+  y += 8;
   QTERMS.forEach(function(sec){
-    // keep the section title with at least the start of its list
-    ensure(Math.min(40 + bulletsHeight(sec[2]), H - 220));
+    ensure(Math.min(46+bulletsHeight(sec[2]), H-240));
     sectionTitle(sec[0]);
     if(sec[1]) headedList(sec[1], sec[2], true); else bullets(sec[2]);
-    if(sec[3]){ y+=4; headedList(sec[3], sec[4], true); }
+    if(sec[3]){ y+=6; headedList(sec[3], sec[4], true); }
   });
+  ensure(150);
   sectionTitle('Acceptance');
   para('By confirming the order and making advance payment, the client agrees to all the above Terms & Conditions.');
-  y+=8;
-  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-  ensure(50);
-  doc.text('Warm regards,', Mg, y); y+=13;
-  doc.text('Flenbo Foodworks Private Limited', Mg, y); y+=15;
-  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(55,50,46);
-  doc.text('+91 93118 77987', Mg, y); y+=12;
-  doc.text('customercare@flenbo.com', Mg, y); y+=12;
+  y += 6;
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.6); doc.setTextColor(INK[0],INK[1],INK[2]);
+  doc.text('Warm regards,', Mg, y); y += 14;
+  doc.text(co.name, Mg, y); y += 16;
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(BODY[0],BODY[1],BODY[2]);
+  doc.text(co.phone2, Mg, y); y += 12.5;
+  doc.text(co.email2, Mg, y); y += 12.5;
   doc.text('@gatherings.gourmet', Mg, y);
   footer();
 
