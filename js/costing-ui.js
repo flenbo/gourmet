@@ -840,16 +840,19 @@ function sendQuoteWhatsapp(){
       .catch(function(){ /* user dismissed */ });
     return;
   }
-  // Desktop: WhatsApp Web will not carry pre-filled text into the caption box once a
-  // file is attached, so copy the message to the clipboard for a single paste.
+  // Desktop. Open the chat FIRST — window.open must run inside the click's own
+  // call stack or the browser treats it as an unsolicited popup and blocks it.
+  var url = num ? ('https://wa.me/'+num) : 'https://web.whatsapp.com/';
+  var win = window.open(url, '_blank');
   doc.save(quoteFileName());
+  // WhatsApp Web drops pre-filled text once a file is attached, so put the
+  // caption on the clipboard for a single paste.
   copyToClipboard(msg).then(function(){
-    toast('PDF downloaded · message copied — attach the PDF, then paste with Ctrl+V','ok');
+    toast(win ? 'Chat opened · PDF downloaded · message copied — attach the PDF, then Ctrl+V'
+              : 'PDF downloaded · message copied — allow popups to open the chat automatically','ok');
   }).catch(function(){
     toast('PDF downloaded — attach it in the WhatsApp window','ok');
   });
-  var url = num ? ('https://wa.me/'+num) : 'https://web.whatsapp.com/';
-  setTimeout(function(){ window.open(url, '_blank'); }, 400);
 }
 
 /* ---------- save costing back onto the event ---------- */
