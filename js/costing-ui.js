@@ -400,13 +400,18 @@ function buildQuotePdf(){
   function ensure(sp){ if(y+sp > H-60){ footer(); doc.addPage(); brandHeader(curSub+' (CONTD.)'); } }
   function brandHeader(sub){
     if(sub.indexOf('(CONTD.)')<0) curSub=sub;
-    doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,118,'F');
-    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(2); doc.line(0,118,W,118);
-    if(LOGO && LOGO.full){ var lw=150, lh=lw*(LOGO.fullH/LOGO.fullW);
-      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, 16, lw, lh); }catch(e){} }
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
-    doc.text(sub, W/2, 108, {align:'center'});
-    y = 146;
+    var BAND=124, SUB_Y=104;
+    doc.setFillColor(CREAM[0],CREAM[1],CREAM[2]); doc.rect(0,0,W,BAND,'F');
+    doc.setDrawColor(RED[0],RED[1],RED[2]); doc.setLineWidth(2); doc.line(0,BAND,W,BAND);
+    if(LOGO && LOGO.full){
+      var lw=158, lh=lw*(LOGO.fullH/LOGO.fullW);
+      // centre the mark in the space above the subtitle
+      var top = Math.max(10, (SUB_Y - 12 - lh)/2);
+      try{ doc.addImage(LOGO.full,'PNG', W/2-lw/2, top, lw, lh); }catch(e){}
+    }
+    doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(MUTED[0],MUTED[1],MUTED[2]);
+    doc.text(sub, W/2, SUB_Y, {align:'center', charSpace:1.1});
+    y = 152;
   }
   function sectionTitle(t){
     ensure(40); y+=6;
@@ -421,6 +426,21 @@ function buildQuotePdf(){
     doc.setFontSize(10); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
     var l=doc.splitTextToSize(v, W-Mg-Mg-140); doc.text(l, Mg+140, y);
     y += Math.max(14, l.length*12);
+  }
+  function bulletsHeight(items){
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+    var h=0; items.forEach(function(t){ h += doc.splitTextToSize(t, W-Mg-Mg-18).length*12 + 3; });
+    return h;
+  }
+  // heading + list must not be split across a page break
+  function headedList(heading, items, numbered){
+    var need = (heading?14:0) + bulletsHeight(items);
+    ensure(Math.min(need, H - 220));
+    if(heading){
+      doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
+      doc.text(heading, Mg, y); y += 14;
+    }
+    bullets(items, numbered);
   }
   function bullets(items, numbered){
     doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
@@ -571,9 +591,7 @@ function buildQuotePdf(){
   doc.addPage(); brandHeader('TERMS & CONDITIONS');
   para("Gourmet Gatherings is Delhi NCR's premium culinary and experiential hospitality brand, operated by Flenbo Foodworks Private Limited. Whether it's a private celebration, a corporate gathering, or a social function, we pride ourselves on delivering excellence, personalization, and seamless execution.");
   y+=2;
-  doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-  ensure(16); doc.text('Some highlights about us:', Mg, y); y+=14;
-  bullets(['Operated by a passionate team of culinary professionals and hospitality experts',
+  headedList('Some highlights about us:', ['Operated by a passionate team of culinary professionals and hospitality experts',
     'Multi-brand cloud kitchens with high operational standards',
     'Kitchens certified with ISO 9001, ISO 22000, and HACCP for food safety and quality assurance',
     'Capacity to manage events from 20 to 2000+ guests with on-site and off-site setups',
@@ -582,12 +600,11 @@ function buildQuotePdf(){
   doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
   ensure(16); doc.text('Order confirmation in the form of Advance Payment implies acceptance of these terms:', Mg, y, {maxWidth:W-Mg-Mg}); y+=18;
   QTERMS.forEach(function(sec){
+    // keep the section title with at least the start of its list
+    ensure(Math.min(40 + bulletsHeight(sec[2]), H - 220));
     sectionTitle(sec[0]);
-    if(sec[1]){ doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-      ensure(15); doc.text(sec[1], Mg, y); y+=14; bullets(sec[2], true); }
-    else bullets(sec[2]);
-    if(sec[3]){ y+=4; doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(CHAR[0],CHAR[1],CHAR[2]);
-      ensure(15); doc.text(sec[3], Mg, y); y+=14; bullets(sec[4], true); }
+    if(sec[1]) headedList(sec[1], sec[2], true); else bullets(sec[2]);
+    if(sec[3]){ y+=4; headedList(sec[3], sec[4], true); }
   });
   sectionTitle('Acceptance');
   para('By confirming the order and making advance payment, the client agrees to all the above Terms & Conditions.');
