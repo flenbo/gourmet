@@ -101,13 +101,17 @@ function injectPages(){
 
   $('#page-rates').innerHTML =
     '<h2 style="margin-bottom:4px">Rates &amp; cost drivers</h2>'+
-    '<p class="small muted" style="margin-bottom:14px">Edit a rate and every quote re-prices. Saved on this device.</p>'+
+    '<p class="small muted" style="margin-bottom:14px">Edit a rate and every quote re-prices. '+
+      '<span id="rateEditNote">Read-only. Press Edit to change rates, units, packs or portions.</span></p>'+
     '<div class="cbar">'+
       '<input id="rateSearch" placeholder="Search raw material…" style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--line);border-radius:8px">'+
       '<select id="rateVendor" style="padding:8px 10px;border:1px solid var(--line);border-radius:8px"></select>'+
       '<button class="btn sm btn-ghost" id="rateExport">⬇ Backup</button>'+
       '<label class="btn sm btn-ghost" style="cursor:pointer">⬆ Restore<input type="file" id="rateImport" accept=".json" hidden></label>'+
       '<button class="btn sm btn-ghost" id="rateReset">Reset to defaults</button>'+
+      '<span style="flex:1"></span>'+
+      '<button class="btn sm" id="rateEdit">✎ Edit</button>'+
+      '<button class="btn sm btn-ghost" id="rateDiscard" style="display:none">Discard</button>'+
     '</div><div id="ratesBody"></div>';
 
   // hook the console's own nav switching
@@ -117,6 +121,11 @@ function injectPages(){
       b.classList.add('active');
       $$('.admin-page').forEach(function(p){p.classList.remove('active');});
       var el=$('#page-'+b.dataset.page); if(el) el.classList.add('active');
+      // leaving the rates page with Edit still open would strand the changes
+      // on this machine, so commit them rather than lose them silently
+      if(b.dataset.page!=='rates' && C.editing()){
+        C.commitEdit(); toast('Rate changes saved','ok');
+      }
       if(b.dataset.page==='rates') renderRates();
       if(b.dataset.page==='ration') renderRation();
     });
@@ -360,7 +369,7 @@ function renderRates(){
           '<td style="color:#888">'+esc(g.mode)+'</td><td style="color:'+(g.conf==='L'?'#b32d2d':g.conf==='H'?'#0a7a0a':'#888')+'">'+esc(g.conf)+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
 
-  $$('[data-drv]').forEach(function(el){ el.onchange=function(){ st.drivers[el.dataset.drv]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-drv]').forEach(function(el){ el.onchange=function(){ if(!C.editing()) return; st.drivers[el.dataset.drv]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   var pullBtn = $('#cPullBtn');
   if(pullBtn) pullBtn.onclick = function(){
     toast('Pulling…','ok');
@@ -370,22 +379,25 @@ function renderRates(){
       if(CUR) render();
     });
   };
-  $$('[data-paper]').forEach(function(el){ el.onchange=function(){ st.drivers.paper=el.value; C.save(); toast('Paper size: '+(el.value==='letter'?'US Letter':'A4'),'ok'); }; });
-  $$('[data-wat]').forEach(function(el){ el.onchange=function(){ st.water[el.dataset.wat]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
-  $$('[data-season]').forEach(function(el){ el.onchange=function(){ st.water.seasons[el.dataset.season]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-paper]').forEach(function(el){ el.onchange=function(){ if(!C.editing()) return; st.drivers.paper=el.value; C.save(); toast('Paper size: '+(el.value==='letter'?'US Letter':'A4'),'ok'); }; });
+  $$('[data-wat]').forEach(function(el){ el.onchange=function(){ if(!C.editing()) return; st.water[el.dataset.wat]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-season]').forEach(function(el){ el.onchange=function(){ if(!C.editing()) return; st.water.seasons[el.dataset.season]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-rate]').forEach(function(el){ el.onchange=function(){
+    if(!C.editing()) return;
     var g = st.rates[el.dataset.rate];
     C.setShownRate(g, el.value); C.save();
     toast('₹'+(+el.value||0)+' '+C.unitLabel(g),'ok'); if(CUR) render();
   }; });
-  $$('[data-buf]').forEach(function(el){ el.onchange=function(){ st.rates[el.dataset.buf].buf=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-buf]').forEach(function(el){ el.onchange=function(){ if(!C.editing()) return; st.rates[el.dataset.buf].buf=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-pack]').forEach(function(el){ el.onchange=function(){
+    if(!C.editing()) return;
     var g = st.rates[el.dataset.pack];
     g.pack = +el.value||0; C.save();
     toast('Pack size saved — affects the ration order, not the quote','ok');
     if(g.pu==='pack') renderRates();       // the price is quoted per pack, so it just moved
   }; });
   $$('[data-portion]').forEach(function(el){ el.onchange=function(){
+    if(!C.editing()) return;
     var n = el.dataset.portion, g = st.rates[n];
     C.setPortion(n, el.value);
     toast(el.value+' '+C.portionUnit(g.base)+' per guest','ok');
@@ -394,6 +406,7 @@ function renderRates(){
   $$('[data-unit]').forEach(function(el){
     el.dataset.was = el.value;
     el.onchange = function(){
+      if(!C.editing()){ el.value = el.dataset.was; return; }
       var n = el.dataset.unit, g = st.rates[n], v = el.value;
       if(v.indexOf('base:') !== 0){        // same item, just a different way of quoting it
         g.pu = v; C.save(); renderRates();
@@ -417,6 +430,28 @@ function renderRates(){
             ' — check the price against your invoice','ok');
     };
   });
+  lockRates();
+}
+
+/* Nothing on this page is editable until Edit is pressed — searching and
+   taking a backup stay available because neither changes anything. */
+function lockRates(){
+  var on = C.editing();
+  var keep = {rateSearch:1, rateVendor:1, rateEdit:1, rateDiscard:1, rateExport:1};
+  $$('#page-rates input, #page-rates select, #page-rates button').forEach(function(el){
+    if(keep[el.id]) return;
+    el.disabled = !on;
+    el.style.opacity = on ? '' : '0.55';
+  });
+  var lbl = $('#rateImport') && $('#rateImport').parentElement;
+  if(lbl){ lbl.style.opacity = on ? '' : '0.55'; lbl.style.pointerEvents = on ? '' : 'none'; }
+  var b = $('#rateEdit'), d = $('#rateDiscard');
+  if(b){ b.textContent = on ? '✓ Save' : '✎ Edit'; b.className = 'btn sm' + (on ? '' : ' btn-ghost'); }
+  if(d) d.style.display = on ? '' : 'none';
+  var note = $('#rateEditNote');
+  if(note) note.textContent = on
+    ? 'Editing. Changes stay on this machine until you press Save.'
+    : 'Read-only. Press Edit to change rates, units, packs or portions.';
 }
 
 /* ---------- branded PDF quote (matches js/pdf.js house style) ---------- */
@@ -706,7 +741,7 @@ function buildQuotePdf(){
   ];
   var placed={}; GRID.forEach(function(r){ r.forEach(function(c){ placed[c[1]]=1; }); });
   // Anything the menu card does not name (custom dishes, unmatched names) is
-  // grouped under one heading rather than leaking a stray — column.
+  // grouped under one heading rather than leaking a stray "—" column.
   var extra=Object.keys(byCat).filter(function(k){ return !placed[k]; });
   if(extra.length){
     var misc=[]; extra.forEach(function(k){ misc=misc.concat(byCat[k]); delete byCat[k]; });
@@ -1041,6 +1076,22 @@ function boot(){
   $('#rCsv').onclick = rationCsv;
   $('#rateSearch').oninput = renderRates;
   $('#rateVendor').onchange = renderRates;
+  $('#rateEdit').onclick = function(){
+    if(C.editing()){
+      C.commitEdit();
+      toast('Saved — syncing to Google Sheets','ok');
+    } else {
+      C.beginEdit();
+      toast('Edit mode on — press Save when you are done','ok');
+    }
+    renderRates();
+  };
+  $('#rateDiscard').onclick = function(){
+    if(!C.editing()) return;
+    if(!confirm('Throw away every change made since you pressed Edit?')) return;
+    C.discardEdit(); renderRates(); if(CUR) render();
+    toast('Changes discarded','ok');
+  };
   $('#rateReset').onclick = function(){ if(confirm('Reset all rates and drivers to defaults?')){ C.reset(); renderRates(); if(CUR) render(); toast('Reset','ok'); } };
   $('#rateExport').onclick = function(){
     var a=document.createElement('a');
