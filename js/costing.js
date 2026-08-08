@@ -177,14 +177,24 @@ function logQuote(rec){
     .catch(function(){ return false; });
 }
 
+/* Edit mode. The rate master is read-only until Edit is pressed; while it is
+   open, changes stay on this device and only reach the shared sheet on Save,
+   so a half-finished edit never lands on the other machines. */
+var _draft = null;
+function editing(){ return _draft !== null; }
+function beginEdit(){ if(_draft === null) _draft = clone(settings()); }
+function commitEdit(){ _draft = null; save(); }
+function discardEdit(){ if(_draft === null) return false; S = _draft; _draft = null; save(); return true; }
+
 function save(){
   try{ localStorage.setItem(LS_RATES, JSON.stringify(S)); }catch(e){}
+  if(window.GG_STORE && GG_STORE.setSetting) GG_STORE.setSetting('costing', S);
+  if(_draft !== null) return;      // hold the sheet write until Save is pressed
   // debounce the network write so typing in a rate field doesn't spam the sheet
   if(_cloudTimer) clearTimeout(_cloudTimer);
   _cloudState.status = 'saving';
   if(window.GG_COST && typeof window.GG_COST.onSync==='function') window.GG_COST.onSync(_cloudState);
   _cloudTimer = setTimeout(cloudPush, 1200);
-  if(window.GG_STORE && GG_STORE.setSetting) GG_STORE.setSetting('costing', S);
 }
 function resetAll(){ S = clone(DEFAULTS); save(); }
 
@@ -589,6 +599,7 @@ window.GG_COST = {
   DATA:D, settings:settings, save:save, reset:resetAll, defaults:DEFAULTS,
   dishesOf:dishesOf, catHints:catHints, dishCost:dishCost, recipeFor:recipeFor, metaFor:metaFor, resolveKey:resolveKey,
   unitOpts:unitOpts, unitFactor:unitFactor, unitLabel:unitLabel, shownRate:shownRate, setShownRate:setShownRate,
+  editing:editing, beginEdit:beginEdit, commitEdit:commitEdit, discardEdit:discardEdit,
   packLabel:packLabel, portionUnit:portionUnit, soloDishes:soloDishes, portionOf:portionOf, setPortion:setPortion, setBase:setBase,
   costEvent:costEvent, priceEvent:priceEvent, ration:ration, invoiceFor:invoiceFor,
   nextInvoiceNo:nextInvoiceNo, money:money, money2:money2, words:words, norm:norm
