@@ -319,12 +319,43 @@ function renderRates(){
         return '<div class="cfield" style="grid-template-columns:1fr 90px"><label>'+esc(k)+' — bottles/guest</label><input type="number" step="0.1" data-season="'+esc(k)+'" value="'+st.water.seasons[k]+'"></div>';
       }).join('')+'</div></div>'+
     '<div class="cbox"><h3>Rate master <span class="pill">'+names.length+' of '+Object.keys(st.rates).length+'</span></h3>'+
+      '<div class="cnote" style="margin:0 0 8px">Type the price the way your invoice reads it — pick the unit next to it (per kg, per 100 g, per piece, per pack). '+
+      'Switching the unit only re-expresses the same price; the cost changes when you type a new number. '+
+      '<b>Pack</b> is your purchase pack: it rounds the ration order up to whole packs and triggers re-order flags. It does not affect the quote. '+
+      '<b>Per guest</b> is the portion — editable for items bought ready-made, where one dish is one purchase.</div>'+
       '<div style="max-height:520px;overflow:auto"><table class="ctbl"><thead><tr><th>Raw material</th><th>Vendor</th>'+
-      '<th class="num" style="width:110px">Rate ₹</th><th>Unit</th><th class="num">Pack</th><th class="num" style="width:80px">Buffer %</th><th>Mode</th><th>Conf</th></tr></thead><tbody>'+
+      '<th class="num" style="width:110px">Rate ₹</th><th style="width:130px">Unit</th><th class="num" style="width:120px">Pack</th>'+
+      '<th class="num" style="width:118px">Per guest</th>'+
+      '<th class="num" style="width:80px">Buffer %</th><th>Mode</th><th>Conf</th></tr></thead><tbody>'+
       names.map(function(n){ var g=st.rates[n];
+        // "per pack" is only worth offering when the pack isn't just one base unit
+        var showPack = !(+g.pack===1 && (g.packu===g.base));
+        var opts = C.unitOpts(g.base).filter(function(u){ return u[0]!=='pack' || showPack; }).map(function(u){
+          var lbl = (u[0]==='pack') ? esc(C.packLabel(g)) : u[1];
+          return '<option value="'+u[0]+'"'+(((g.pu||g.base)===u[0])?' selected':'')+'>'+lbl+'</option>';
+        }).join('');
+        // let her move a bought-in item between weight and pieces
+        if(C.portionOf(n)!==null){
+          var alt = (g.base==='pc') ? [['kg','↔ switch to weight (kg)'],['L','↔ switch to volume (L)']]
+                                    : [['pc','↔ switch to pieces']];
+          opts += '<optgroup label="Change how it is bought">'+alt.map(function(a){
+            return '<option value="base:'+a[0]+'">'+a[1]+'</option>'; }).join('')+'</optgroup>';
+        }
+
+        var p = C.portionOf(n), pu = C.portionUnit(g.base);
+        var portionCell = (p===null)
+          ? '<td class="num" style="color:#bbb" title="Used in more than one dish — the portion is part of each recipe">—</td>'
+          : '<td><div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">'+
+            '<input type="number" step="'+(g.base==='pc'?'0.25':'1')+'" data-portion="'+esc(n)+'" value="'+p+'" style="width:62px">'+
+            '<span style="color:#888;font-size:11px">'+pu+'</span></div></td>';
+
         return '<tr class="rateRow"><td>'+esc(n)+'</td><td style="color:#888">'+esc(g.vendor)+'</td>'+
-          '<td><input type="number" step="0.01" data-rate="'+esc(n)+'" value="'+g.rate+'"></td>'+
-          '<td style="color:#888">per '+esc(g.base)+'</td><td class="num">'+g.pack+' '+esc(g.packu)+'</td>'+
+          '<td><input type="number" step="0.01" data-rate="'+esc(n)+'" value="'+C.shownRate(g)+'"></td>'+
+          '<td><select data-unit="'+esc(n)+'" style="width:100%;padding:4px 2px;border:1px solid var(--line);border-radius:6px;background:#fff">'+opts+'</select></td>'+
+          '<td><div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">'+
+            '<input type="number" step="0.05" data-pack="'+esc(n)+'" value="'+g.pack+'" style="width:60px">'+
+            '<span style="color:#888;font-size:11px">'+esc(g.packu)+'</span></div></td>'+
+          portionCell+
           '<td><input type="number" step="1" data-buf="'+esc(n)+'" value="'+g.buf+'"></td>'+
           '<td style="color:#888">'+esc(g.mode)+'</td><td style="color:'+(g.conf==='L'?'#b32d2d':g.conf==='H'?'#0a7a0a':'#888')+'">'+esc(g.conf)+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
@@ -334,7 +365,7 @@ function renderRates(){
   if(pullBtn) pullBtn.onclick = function(){
     toast('Pulling…','ok');
     C.syncFromCloud().then(function(got){
-      paintRates();
+      renderRates();
       toast(got ? 'Rates pulled from Google Sheets' : 'Nothing saved in the sheet yet', got?'ok':'err');
       if(CUR) render();
     });
@@ -342,8 +373,50 @@ function renderRates(){
   $$('[data-paper]').forEach(function(el){ el.onchange=function(){ st.drivers.paper=el.value; C.save(); toast('Paper size: '+(el.value==='letter'?'US Letter':'A4'),'ok'); }; });
   $$('[data-wat]').forEach(function(el){ el.onchange=function(){ st.water[el.dataset.wat]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
   $$('[data-season]').forEach(function(el){ el.onchange=function(){ st.water.seasons[el.dataset.season]=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
-  $$('[data-rate]').forEach(function(el){ el.onchange=function(){ st.rates[el.dataset.rate].rate=+el.value||0; C.save(); toast('Rate saved','ok'); if(CUR) render(); }; });
+  $$('[data-rate]').forEach(function(el){ el.onchange=function(){
+    var g = st.rates[el.dataset.rate];
+    C.setShownRate(g, el.value); C.save();
+    toast('₹'+(+el.value||0)+' '+C.unitLabel(g),'ok'); if(CUR) render();
+  }; });
   $$('[data-buf]').forEach(function(el){ el.onchange=function(){ st.rates[el.dataset.buf].buf=+el.value||0; C.save(); toast('Saved','ok'); if(CUR) render(); }; });
+  $$('[data-pack]').forEach(function(el){ el.onchange=function(){
+    var g = st.rates[el.dataset.pack];
+    g.pack = +el.value||0; C.save();
+    toast('Pack size saved — affects the ration order, not the quote','ok');
+    if(g.pu==='pack') renderRates();       // the price is quoted per pack, so it just moved
+  }; });
+  $$('[data-portion]').forEach(function(el){ el.onchange=function(){
+    var n = el.dataset.portion, g = st.rates[n];
+    C.setPortion(n, el.value);
+    toast(el.value+' '+C.portionUnit(g.base)+' per guest','ok');
+    if(CUR) render();
+  }; });
+  $$('[data-unit]').forEach(function(el){
+    el.dataset.was = el.value;
+    el.onchange = function(){
+      var n = el.dataset.unit, g = st.rates[n], v = el.value;
+      if(v.indexOf('base:') !== 0){        // same item, just a different way of quoting it
+        g.pu = v; C.save(); renderRates();
+        toast('Now priced '+C.unitLabel(g)+' — same cost, ₹'+C.shownRate(g),'ok');
+        return;
+      }
+      var nb = v.slice(5), p = C.portionOf(n);
+      if(p === null){
+        toast(n+' is used inside recipes, so it cannot be switched to pieces here','err');
+        el.value = el.dataset.was; return;
+      }
+      var word = nb==='pc' ? 'pieces' : (nb==='L' ? 'ml' : 'grams');
+      var ans = prompt('Switching '+n+' to '+(nb==='pc'?'pieces':nb)+'.\n\n'+
+        'Right now each guest gets '+p+' '+C.portionUnit(g.base)+'.\n'+
+        'How many '+word+' per guest?', nb==='pc' ? '1' : String(p));
+      if(ans === null || !(+ans > 0)){ el.value = el.dataset.was; return; }
+      C.setBase(n, nb, +ans);
+      renderRates();
+      if(CUR) render();
+      toast(n+': '+ans+' '+word+' per guest at ₹'+C.shownRate(st.rates[n])+' '+C.unitLabel(st.rates[n])+
+            ' — check the price against your invoice','ok');
+    };
+  });
 }
 
 /* ---------- branded PDF quote (matches js/pdf.js house style) ---------- */
@@ -985,7 +1058,7 @@ function boot(){
   // pull shared rates so every machine starts from the same numbers
   if(C.syncFromCloud) C.syncFromCloud().then(function(got){
     refreshSyncPill();
-    if(got){ toast('Rates synced from Google Sheets','ok'); if(CUR) render(); if(PAGE==='rates') paintRates(); }
+    if(got){ toast('Rates synced from Google Sheets','ok'); if(CUR) render(); if(PAGE==='rates') renderRates(); }
   });
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
