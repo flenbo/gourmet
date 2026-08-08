@@ -35,8 +35,63 @@ var DEFAULTS = {
   cleaning:(function(){ var o={}; D.cleaning.forEach(function(a){
              o[a[0]]={rate:a[1],unit:a[2],base:a[3],per100:a[4],pack:a[5]}; }); return o; })(),
   company: clone(D.company),
-  catRates:clone(D.catRates)
+  catRates:clone(D.catRates),
+  portions:{}          // "<recipeKey>::<ingredient>" -> qty per guest, in that ingredient's base unit
 };
+
+/* ---------- buying units -------------------------------------------------
+   The engine always holds `rate` per base unit (kg / L / pc) and recipe
+   quantities in grams / ml / pieces. `pu` only changes how a price is typed
+   and shown, so nothing downstream has to know about it.
+   ------------------------------------------------------------------------ */
+var UNIT_OPTS = {
+  kg: [['kg','per kg',1],['500g','per 500 g',0.5],['250g','per 250 g',0.25],
+       ['100g','per 100 g',0.1],['50g','per 50 g',0.05],['pack','per pack',null]],
+  L:  [['L','per litre',1],['500ml','per 500 ml',0.5],['250ml','per 250 ml',0.25],
+       ['100ml','per 100 ml',0.1],['pack','per pack',null]],
+  pc: [['pc','per piece',1],['dozen','per dozen',12],['pack','per pack',null]]
+};
+function unitOpts(base){ return UNIT_OPTS[base] || UNIT_OPTS.kg; }
+// how many base units one buying-unit holds
+function unitFactor(g){
+  if(!g) return 1;
+  var pu = g.pu || g.base;
+  if(pu === 'pack') return (+g.pack > 0 ? +g.pack : 1);
+  var row = unitOpts(g.base).filter(function(u){ return u[0]===pu; })[0];
+  return (row && row[2] != null) ? row[2] : 1;
+}
+var MEASURE = {kg:1, L:1, pc:1, g:1, ml:1};
+// "per crate (24 pc)" when the pack has a name of its own, else "per pack (0.5 kg)"
+function packLabel(g){
+  var pk = g.pack || 1, u = g.packu || g.base;
+  return MEASURE[u] ? ('per pack (' + pk + ' ' + u + ')')
+                    : ('per ' + u + ' (' + pk + ' ' + g.base + ')');
+}
+function unitLabel(g){
+  if(!g) return '';
+  var pu = g.pu || g.base;
+  if(pu === 'pack') return packLabel(g);
+  var row = unitOpts(g.base).filter(function(u){ return u[0]===pu; })[0];
+  return row ? row[1] : ('per ' + g.base);
+}
+function shownRate(g){ return Math.round(g.rate * unitFactor(g) * 100) / 100; }
+function setShownRate(g, v){ g.rate = (+v || 0) / unitFactor(g); }
+// the unit a recipe quantity is written in
+function portionUnit(base){ return base==='pc' ? 'pc' : (base==='L' ? 'ml' : 'g'); }
+
+/* Items bought ready-made: exactly one ingredient makes the whole dish, so a
+   single "per guest" figure is meaningful. Everything else is a cooked recipe
+   with a different quantity in each dish. */
+var _solo = null;
+function soloDishes(){
+  if(_solo) return _solo;
+  _solo = {};
+  Object.keys(D.recipes).forEach(function(k){
+    var r = D.recipes[k];
+    if(r && r.length === 1){ var nm = D.ings[r[0][0]][0]; (_solo[nm] = _solo[nm] || []).push(k); }
+  });
+  return _solo;
+}
 
 var S = null;
 function settings(){
@@ -92,7 +147,12 @@ function syncFromCloud(){
   settings();                     // S is lazily built — make sure it exists before merging
   return cloudPull().then(function(remote){
     if(!remote) return false;
-    if(remote.rates)   S.rates   = Object.assign({}, S.rates,   remote.rates);
+    // merge rate rows field by field, so a machine that hasn't saved since the
+    // buying-unit feature landed can't wipe another machine's `pu`
+    if(remote.rates) Object.keys(remote.rates).forEach(function(n){
+      S.rates[n] = Object.assign({}, S.rates[n] || {}, remote.rates[n]);
+    });
+    if(remote.portions) S.portions = Object.assign({}, S.portions || {}, remote.portions);
     if(remote.drivers) S.drivers = Object.assign({}, S.drivers, remote.drivers);
     if(remote.labour)  S.labour  = remote.labour;
     if(remote.water)   S.water   = Object.assign({}, S.water,   remote.water);
@@ -189,7 +249,60 @@ function resolveKey(name){
 }
 function recipeFor(name){
   var r = resolveKey(name);
-  return r.key ? D.recipes[r.key] : null;
+  return r.key ? recipeByKey(r.key) : null;
+}
+// the stock recipe with any portion the user has overridden applied on top
+function recipeByKey(key){
+  var base = D.recipes[key];
+  if(!base) return null;
+  var ov = settings().portions || {};
+  var hit = false;
+  for(var i=0;i<base.length;i++){
+    if(ov[key + '::' + D.ings[base[i][0]][0]] !== undefined){ hit = true; break; }
+  }
+  if(!hit) return base;
+  return base.map(function(p){
+    var v = ov[key + '::' + D.ings[p[0]][0]];
+    return v === undefined ? p : [p[0], v];
+  });
+}
+// current per-guest portion of a bought-in item (in its base unit)
+function portionOf(name){
+  var ks = soloDishes()[name] || [];
+  if(!ks.length) return null;
+  var r = recipeByKey(ks[0]);
+  return r ? r[0][1] : null;
+}
+function setPortion(name, qty){
+  var st = settings(), ks = soloDishes()[name] || [];
+  if(!ks.length) return false;
+  st.portions = st.portions || {};
+  ks.forEach(function(k){ st.portions[k + '::' + name] = +qty || 0; });
+  save();
+  return true;
+}
+/* Move an item between weight and pieces. The portion has to move with it, so
+   the caller supplies the new per-guest figure; the rate is rebased to keep
+   cost per guest identical until a real invoice price is typed in. */
+function setBase(name, newBase, perGuest){
+  var st = settings(), g = st.rates[name];
+  if(!g || g.base === newBase) return false;
+  var before = null, p = portionOf(name);
+  if(p != null) before = (g.base==='pc') ? p * g.rate : (p/1000) * g.rate;
+
+  g.base = newBase;
+  g.pu   = newBase;
+  if(g.packu === 'kg' || g.packu === 'L' || g.packu === 'pc') g.packu = newBase;
+
+  perGuest = +perGuest || 0;
+  if(p != null && perGuest > 0){
+    setPortion(name, perGuest);
+    if(before != null){
+      g.rate = (newBase==='pc') ? before / perGuest : before / (perGuest/1000);
+    }
+  }
+  save();
+  return true;
 }
 function metaFor(name){
   var r = resolveKey(name);
@@ -475,6 +588,8 @@ window.GG_COST = {
   logQuote: logQuote,
   DATA:D, settings:settings, save:save, reset:resetAll, defaults:DEFAULTS,
   dishesOf:dishesOf, catHints:catHints, dishCost:dishCost, recipeFor:recipeFor, metaFor:metaFor, resolveKey:resolveKey,
+  unitOpts:unitOpts, unitFactor:unitFactor, unitLabel:unitLabel, shownRate:shownRate, setShownRate:setShownRate,
+  packLabel:packLabel, portionUnit:portionUnit, soloDishes:soloDishes, portionOf:portionOf, setPortion:setPortion, setBase:setBase,
   costEvent:costEvent, priceEvent:priceEvent, ration:ration, invoiceFor:invoiceFor,
   nextInvoiceNo:nextInvoiceNo, money:money, money2:money2, words:words, norm:norm
 };
